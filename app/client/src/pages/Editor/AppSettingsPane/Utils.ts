@@ -1,5 +1,5 @@
 import { APP_MODE } from "entities/App";
-import urlBuilder from "entities/URLRedirect/URLAssembly";
+import urlBuilder from "ee/entities/URLRedirect/URLAssembly";
 import { splitPathPreview } from "utils/helpers";
 
 export const getUrlPreview = (
@@ -46,7 +46,7 @@ export const getUrlPreview = (
   };
 };
 
-const filterAccentedAndSpecialCharacters = (value: string) => {
+export const filterAccentedAndSpecialCharacters = (value: string) => {
   return decodeURI(value)
     .replaceAll(" ", "-")
     .replaceAll(/[^A-Za-z0-9-]/g, "");

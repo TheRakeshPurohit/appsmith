@@ -1,11 +1,17 @@
 import { ValidationTypes } from "constants/WidgetValidation";
+import type { TableWidgetProps } from "widgets/TableWidgetV2/constants";
+import { ColumnTypes, ICON_NAMES } from "widgets/TableWidgetV2/constants";
 import {
-  ColumnTypes,
-  ICON_NAMES,
-  TableWidgetProps,
-} from "widgets/TableWidgetV2/constants";
-import { hideByColumnType, updateIconAlignment } from "../../propertyUtils";
+  hideByColumnType,
+  hideByMenuItemsSource,
+  hideIfMenuItemsSourceDataIsFalsy,
+  updateIconAlignment,
+  updateMenuItemsSource,
+} from "../../propertyUtils";
 import { IconNames } from "@blueprintjs/icons";
+import { MenuItemsSource } from "widgets/MenuButtonWidget/constants";
+import { EvaluationSubstitutionType } from "entities/DataTree/dataTreeFactory";
+import configureMenuItemsConfig from "./childPanels/configureMenuItemsConfig";
 
 export default {
   sectionName: "Basic",
@@ -71,18 +77,148 @@ export default {
       isTriggerProperty: false,
     },
     {
-      helpText: "Menu items",
-      propertyName: "menuItems",
-      controlType: "MENU_ITEMS",
-      label: "Menu Items",
+      propertyName: "menuItemsSource",
+      helpText: "Sets the source for the menu items",
+      label: "Menu items source",
+      controlType: "ICON_TABS",
+      fullWidth: true,
+      defaultValue: MenuItemsSource.STATIC,
+      options: [
+        {
+          label: "Static",
+          value: MenuItemsSource.STATIC,
+        },
+        {
+          label: "Dynamic",
+          value: MenuItemsSource.DYNAMIC,
+        },
+      ],
+      isJSConvertible: false,
       isBindProperty: false,
       isTriggerProperty: false,
+      validation: { type: ValidationTypes.TEXT },
+      updateHook: updateMenuItemsSource,
+      dependencies: [
+        "primaryColumns",
+        "columnOrder",
+        "sourceData",
+        "configureMenuItems",
+      ],
       hidden: (props: TableWidgetProps, propertyPath: string) => {
         return hideByColumnType(
           props,
           propertyPath,
           [ColumnTypes.MENU_BUTTON],
           false,
+        );
+      },
+    },
+    {
+      helpText: "Takes in an array of items to display the menu items.",
+      propertyName: "sourceData",
+      label: "Source data",
+      controlType: "TABLE_COMPUTE_VALUE",
+      placeholderText: "{{Query1.data}}",
+      isBindProperty: true,
+      isTriggerProperty: false,
+      validation: {
+        type: ValidationTypes.ARRAY,
+        params: {
+          required: true,
+          default: [],
+          children: {
+            type: ValidationTypes.ARRAY,
+            params: {
+              required: true,
+              default: [],
+              children: {
+                type: ValidationTypes.UNION,
+                params: {
+                  required: true,
+                  types: [
+                    {
+                      type: ValidationTypes.TEXT,
+                      params: {
+                        required: true,
+                      },
+                    },
+                    {
+                      type: ValidationTypes.NUMBER,
+                      params: {
+                        required: true,
+                      },
+                    },
+                    {
+                      type: ValidationTypes.OBJECT,
+                      params: {
+                        required: true,
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      },
+      evaluationSubstitutionType: EvaluationSubstitutionType.SMART_SUBSTITUTE,
+      hidden: (props: TableWidgetProps, propertyPath: string) => {
+        return (
+          hideByColumnType(
+            props,
+            propertyPath,
+            [ColumnTypes.MENU_BUTTON],
+            false,
+          ) ||
+          hideByMenuItemsSource(props, propertyPath, MenuItemsSource.STATIC)
+        );
+      },
+      dependencies: ["primaryColumns", "columnOrder", "menuItemsSource"],
+    },
+    {
+      helpText: "Configure how each menu item will appear.",
+      propertyName: "configureMenuItems",
+      controlType: "OPEN_CONFIG_PANEL",
+      buttonConfig: {
+        label: "Configure",
+        icon: "settings-v3",
+      },
+      label: "Configure menu items",
+      isBindProperty: false,
+      isTriggerProperty: false,
+      hidden: (props: TableWidgetProps, propertyPath: string) =>
+        hideByColumnType(
+          props,
+          propertyPath,
+          [ColumnTypes.MENU_BUTTON],
+          false,
+        ) ||
+        hideIfMenuItemsSourceDataIsFalsy(props, propertyPath) ||
+        hideByMenuItemsSource(props, propertyPath, MenuItemsSource.STATIC),
+      dependencies: [
+        "primaryColumns",
+        "columnOrder",
+        "menuItemsSource",
+        "sourceData",
+      ],
+      panelConfig: configureMenuItemsConfig,
+    },
+    {
+      helpText: "Menu items",
+      propertyName: "menuItems",
+      controlType: "MENU_ITEMS",
+      label: "Menu items",
+      isBindProperty: false,
+      isTriggerProperty: false,
+      hidden: (props: TableWidgetProps, propertyPath: string) => {
+        return (
+          hideByColumnType(
+            props,
+            propertyPath,
+            [ColumnTypes.MENU_BUTTON],
+            false,
+          ) ||
+          hideByMenuItemsSource(props, propertyPath, MenuItemsSource.DYNAMIC)
         );
       },
       dependencies: ["primaryColumns", "columnOrder"],
@@ -107,7 +243,7 @@ export default {
                 dependencies: ["primaryColumns", "columnOrder"],
               },
               {
-                helpText: "Triggers an action when the menu item is clicked",
+                helpText: "when the menu item is clicked",
                 propertyName: "onClick",
                 label: "onClick",
                 controlType: "ACTION_SELECTOR",
@@ -177,13 +313,15 @@ export default {
                 label: "Position",
                 helpText: "Sets the icon alignment of a menu item",
                 controlType: "ICON_TABS",
+                defaultValue: "left",
+                fullWidth: false,
                 options: [
                   {
-                    icon: "VERTICAL_LEFT",
+                    startIcon: "skip-left-line",
                     value: "left",
                   },
                   {
-                    icon: "VERTICAL_RIGHT",
+                    startIcon: "skip-right-line",
                     value: "right",
                   },
                 ],
@@ -252,7 +390,7 @@ export default {
       },
     },
     {
-      helpText: "Triggers an action when the button is clicked",
+      helpText: "when the button is clicked",
       propertyName: "onClick",
       label: "onClick",
       controlType: "ACTION_SELECTOR",

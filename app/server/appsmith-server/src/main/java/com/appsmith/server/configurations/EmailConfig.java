@@ -1,5 +1,6 @@
 package com.appsmith.server.configurations;
 
+import jakarta.mail.internet.InternetAddress;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.Setter;
@@ -9,7 +10,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.util.StringUtils;
 
-import javax.mail.internet.InternetAddress;
 import java.io.UnsupportedEncodingException;
 
 @Getter
@@ -28,9 +28,6 @@ public class EmailConfig {
 
     @Value("${reply.to}")
     private String replyTo;
-
-    @Value("${emails.welcome.enabled:true}")
-    private boolean isWelcomeEmailEnabled;
 
     @Value("${mail.support}")
     private String supportEmailAddress;
@@ -53,5 +50,4 @@ public class EmailConfig {
             }
         }
     }
-
 }

@@ -7,15 +7,17 @@ import DisabledIndeterminate from "assets/icons/widget/checkbox//disabled-indete
 
 import { darkenColor } from "widgets/WidgetUtils";
 
-type StyledCheckboxProps = {
+interface StyledCheckboxProps {
   checked?: boolean;
   disabled?: boolean;
   borderRadius?: string;
   indeterminate?: boolean;
   hasError?: boolean;
   accentColor?: string;
+  // TODO: Fix this the next time the file is edited
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   inputRef?: (el: HTMLInputElement | null) => any;
-};
+}
 
 const Checkbox = styled(BlueprintCheckbox)<StyledCheckboxProps>`
   ${({ accentColor, alignIndicator, borderRadius, hasError }) => `
@@ -59,7 +61,8 @@ const Checkbox = styled(BlueprintCheckbox)<StyledCheckboxProps>`
     }
 
     // hover
-    &.bp3-control.bp3-checkbox:hover input:not(:checked) ~ .bp3-control-indicator {
+    &.bp3-control.bp3-checkbox:hover input:not(:checked) ~ .bp3-control-indicator,
+    input:not(:checked):focus ~ .bp3-control-indicator {
       box-shadow: 0px 0px 0px 1px ${
         hasError
           ? "var(--wds-color-border-danger-hover)"
@@ -68,7 +71,10 @@ const Checkbox = styled(BlueprintCheckbox)<StyledCheckboxProps>`
     }
 
     // hover on checked
-    &.bp3-control.bp3-checkbox:hover input:checked ~ .bp3-control-indicator,  &.bp3-control.bp3-checkbox:hover input:indeterminate ~ .bp3-control-indicator {
+    &.bp3-control.bp3-checkbox:hover input:checked ~ .bp3-control-indicator,
+    &.bp3-control.bp3-checkbox:hover input:indeterminate ~ .bp3-control-indicator,
+    &.bp3-control.bp3-checkbox input:checked:focus ~ .bp3-control-indicator,
+    &.bp3-control.bp3-checkbox input:indeterminate:focus ~ .bp3-control-indicator  {
       box-shadow: none;
       background: ${darkenColor(accentColor)} !important;
     }

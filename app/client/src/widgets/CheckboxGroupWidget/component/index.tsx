@@ -1,13 +1,11 @@
 import React from "react";
 import styled from "styled-components";
-import { Alignment } from "@blueprintjs/core";
+import type { Alignment } from "@blueprintjs/core";
 
 import { Classes } from "@blueprintjs/core";
-import { ComponentProps } from "widgets/BaseComponent";
-import { generateReactKey } from "utils/generators";
-import { Colors } from "constants/Colors";
+import type { ComponentProps } from "widgets/BaseComponent";
 import { LabelPosition } from "components/constants";
-import { TextSize } from "constants/WidgetConstants";
+import type { TextSize } from "constants/WidgetConstants";
 
 // TODO(abstraction-issue): this needs to be a common import from somewhere in the platform
 // Alternatively, they need to be replicated.
@@ -15,12 +13,14 @@ import {
   CheckboxLabel,
   StyledCheckbox,
 } from "widgets/CheckboxWidget/component";
-import { OptionProps, SelectAllState, SelectAllStates } from "../constants";
+import type { OptionProps, SelectAllState } from "../constants";
+import { SelectAllStates } from "../constants";
 import LabelWithTooltip, {
   labelLayoutStyles,
   LABEL_CONTAINER_CLASS,
 } from "widgets/components/LabelWithTooltip";
-import { ThemeProp, AlignWidgetTypes } from "widgets/constants";
+import type { ThemeProp } from "WidgetProvider/constants";
+import { AlignWidgetTypes } from "WidgetProvider/constants";
 
 export interface InputContainerProps {
   inline?: boolean;
@@ -28,6 +28,7 @@ export interface InputContainerProps {
   valid?: boolean;
   optionAlignment?: string;
   isDynamicHeightEnabled?: boolean;
+  minWidth?: number;
 }
 
 const InputContainer = styled.div<ThemeProp & InputContainerProps>`
@@ -41,15 +42,17 @@ const InputContainer = styled.div<ThemeProp & InputContainerProps>`
     !!optionAlignment
       ? optionAlignment
       : optionCount > 1
-      ? `space-between`
-      : inline
-      ? `flex-start`
-      : `center`};
+        ? `space-between`
+        : inline
+          ? `flex-start`
+          : `center`};
   width: 100%;
   flex-grow: 1;
   height: 100%;
-  
   border: 1px solid transparent;
+
+  ${({ minWidth }) => `
+    ${minWidth ? `min-width: ${minWidth}px;` : ""}`};
 
   .${Classes.CONTROL} {
     display: flex;
@@ -75,9 +78,6 @@ export const CheckboxGroupContainer = styled.div<CheckboxGroupContainerProps>`
     ${({ labelPosition }) =>
       labelPosition === LabelPosition.Left && "min-height: 30px"};
   }
-  & .select-all {
-    white-space: nowrap;
-  }
 `;
 
 export interface SelectAllProps {
@@ -88,7 +88,6 @@ export interface SelectAllProps {
   onChange: React.FormEventHandler<HTMLInputElement>;
   accentColor: string;
   borderRadius: string;
-  isDisabled?: boolean;
 }
 
 function SelectAll(props: SelectAllProps) {
@@ -99,15 +98,15 @@ function SelectAll(props: SelectAllProps) {
     disabled,
     indeterminate,
     inline,
-    isDisabled,
     onChange,
   } = props;
+
   return (
     <StyledCheckbox
       accentColor={accentColor}
       borderRadius={borderRadius}
       checked={checked}
-      className="select-all"
+      className="whitespace-nowrap"
       disabled={disabled}
       indeterminate={indeterminate}
       inline={inline}
@@ -115,8 +114,7 @@ function SelectAll(props: SelectAllProps) {
         <CheckboxLabel
           alignment={AlignWidgetTypes.LEFT}
           className="t--checkbox-widget-label"
-          disabled={isDisabled}
-          labelTextColor={disabled ? Colors.GREY_8 : "inherit"}
+          disabled={disabled}
         >
           Select all
         </CheckboxLabel>
@@ -152,7 +150,9 @@ export interface CheckboxGroupComponentProps extends ComponentProps {
   labelTooltip?: string;
   accentColor: string;
   borderRadius: string;
+  minWidth?: number;
 }
+
 function CheckboxGroupComponent(props: CheckboxGroupComponentProps) {
   const {
     accentColor,
@@ -176,6 +176,7 @@ function CheckboxGroupComponent(props: CheckboxGroupComponentProps) {
     optionAlignment,
     options,
     selectedValues,
+    widgetId,
   } = props;
 
   const selectAllChecked = selectedValues.length === options.length;
@@ -184,10 +185,11 @@ function CheckboxGroupComponent(props: CheckboxGroupComponentProps) {
   const selectAllState = selectAllChecked
     ? SelectAllStates.CHECKED
     : selectAllIndeterminate
-    ? SelectAllStates.INDETERMINATE
-    : SelectAllStates.UNCHECKED;
+      ? SelectAllStates.INDETERMINATE
+      : SelectAllStates.UNCHECKED;
 
   let optionCount = (options || []).length;
+
   if (isSelectAll) {
     optionCount += 1;
   }
@@ -217,9 +219,10 @@ function CheckboxGroupComponent(props: CheckboxGroupComponentProps) {
         />
       )}
       <InputContainer
-        data-cy="checkbox-group-container"
+        data-testid="checkbox-group-container"
         inline={isInline}
         isDynamicHeightEnabled={isDynamicHeightEnabled}
+        minWidth={props.minWidth}
         optionAlignment={optionAlignment}
         optionCount={options.length}
       >
@@ -236,7 +239,7 @@ function CheckboxGroupComponent(props: CheckboxGroupComponentProps) {
         )}
         {options &&
           options.length > 0 &&
-          [...options].map((option: OptionProps) => (
+          [...options].map((option: OptionProps, index: number) => (
             <StyledCheckbox
               accentColor={accentColor}
               borderRadius={borderRadius}
@@ -244,7 +247,7 @@ function CheckboxGroupComponent(props: CheckboxGroupComponentProps) {
               disabled={isDisabled}
               hasError={!isValid}
               inline={isInline}
-              key={generateReactKey()}
+              key={`${widgetId}-checkbox-${index}`}
               labelElement={
                 <CheckboxLabel
                   alignment={AlignWidgetTypes.LEFT}

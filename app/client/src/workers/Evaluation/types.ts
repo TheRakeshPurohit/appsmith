@@ -1,25 +1,41 @@
-import { ActionValidationConfigMap } from "constants/PropertyControlConstants";
-import { UserLogObject } from "entities/AppsmithConsole";
-import { AppTheme } from "entities/AppTheming";
-import { DataTree, UnEvalTree } from "entities/DataTree/dataTreeFactory";
-import { CanvasWidgetsReduxState } from "reducers/entityReducers/canvasWidgetsReducer";
+import type { unEvalAndConfigTree } from "entities/DataTree/dataTreeTypes";
+import type { ActionValidationConfigMap } from "constants/PropertyControlConstants";
+import type { AppTheme } from "entities/AppTheming";
 
-import {
-  DependencyMap,
-  EvalError,
-  EVAL_WORKER_ACTIONS,
-} from "utils/DynamicBindingUtils";
-import { JSUpdate } from "utils/JSPaneUtils";
-import { WidgetTypeConfigMap } from "utils/WidgetFactory";
-import { EvalMetaUpdates } from "workers/common/DataTreeEvaluator/types";
-import { WorkerRequest } from "workers/common/types";
-import { DataTreeDiff } from "./evaluationUtils";
+import type { CanvasWidgetsReduxState } from "reducers/entityReducers/canvasWidgetsReducer";
+import type { MetaWidgetsReduxState } from "reducers/entityReducers/metaWidgetsReducer";
+import type { DependencyMap, EvalError } from "utils/DynamicBindingUtils";
+import type {
+  EVAL_WORKER_ASYNC_ACTION,
+  EVAL_WORKER_SYNC_ACTION,
+} from "ee/workers/Evaluation/evalWorkerActions";
+import type { JSUpdate } from "utils/JSPaneUtils";
+import type { WidgetTypeConfigMap } from "WidgetProvider/factory";
+import type { EvalMetaUpdates } from "ee/workers/common/DataTreeEvaluator/types";
+import type { WorkerRequest } from "ee/workers/common/types";
+import type { DataTreeDiff } from "ee/workers/Evaluation/evaluationUtils";
+import type { APP_MODE } from "entities/App";
+import type { WebworkerSpanData, Attributes } from "instrumentation/types";
+import type { ICacheProps } from "../common/AppComputationCache/types";
+import type { AffectedJSObjects } from "actions/EvaluationReduxActionTypes";
 
-export type EvalWorkerRequest = WorkerRequest<any, EVAL_WORKER_ACTIONS>;
+// TODO: Fix this the next time the file is edited
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type EvalWorkerSyncRequest<T = any> = WorkerRequest<
+  T,
+  EVAL_WORKER_SYNC_ACTION
+>;
+// TODO: Fix this the next time the file is edited
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type EvalWorkerASyncRequest<T = any> = WorkerRequest<
+  T,
+  EVAL_WORKER_ASYNC_ACTION
+>;
 export type EvalWorkerResponse = EvalTreeResponseData | boolean | unknown;
 
 export interface EvalTreeRequestData {
-  unevalTree: UnEvalTree;
+  cacheProps: ICacheProps;
+  unevalTree: unEvalAndConfigTree;
   widgetTypeConfigMap: WidgetTypeConfigMap;
   widgets: CanvasWidgetsReduxState;
   theme: AppTheme;
@@ -27,17 +43,36 @@ export interface EvalTreeRequestData {
   allActionValidationConfig: {
     [actionId: string]: ActionValidationConfigMap;
   };
-  requiresLinting: boolean;
+  forceEvaluation: boolean;
+  metaWidgets: MetaWidgetsReduxState;
+  appMode?: APP_MODE;
+  // TODO: Fix this the next time the file is edited
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  widgetsMeta: Record<string, any>;
+  shouldRespondWithLogs?: boolean;
+  affectedJSObjects: AffectedJSObjects;
 }
+
 export interface EvalTreeResponseData {
-  dataTree: DataTree;
   dependencies: DependencyMap;
   errors: EvalError[];
   evalMetaUpdates: EvalMetaUpdates;
   evaluationOrder: string[];
   jsUpdates: Record<string, JSUpdate>;
   logs: unknown[];
-  userLogs: UserLogObject[];
   unEvalUpdates: DataTreeDiff[];
   isCreateFirstTree: boolean;
+  staleMetaIds: string[];
+  removedPaths: Array<{ entityId: string; fullpath: string }>;
+  isNewWidgetAdded: boolean;
+  undefinedEvalValuesMap: Record<string, boolean>;
+  jsVarsCreatedEvent?: { path: string; type: string }[];
+  webworkerTelemetry?: Record<string, WebworkerSpanData | Attributes>;
+  updates: string;
+}
+
+export interface UpdateTreeResponse {
+  unEvalUpdates: DataTreeDiff[];
+  evalOrder: string[];
+  jsUpdates: Record<string, JSUpdate>;
 }

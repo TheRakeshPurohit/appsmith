@@ -1,52 +1,80 @@
-import React from "react";
-import { RouteComponentProps } from "react-router";
-import { JSCollection } from "entities/JSCollection";
-import { AppState } from "@appsmith/reducers";
-import { connect } from "react-redux";
+import React, { useMemo } from "react";
+import type { RouteComponentProps } from "react-router";
+import { useDispatch, useSelector } from "react-redux";
 import JsEditorForm from "./Form";
 import * as Sentry from "@sentry/react";
-import { getJSCollectionById } from "selectors/editorSelectors";
+import {
+  getCurrentPageId,
+  getJSCollectionDataByBaseId,
+} from "selectors/editorSelectors";
 import CenteredWrapper from "components/designSystems/appsmith/CenteredWrapper";
 import Spinner from "components/editorComponents/Spinner";
 import styled from "styled-components";
 import EntityNotFoundPane from "../EntityNotFoundPane";
-
+import AppJSEditorContextMenu from "./AppJSEditorContextMenu";
+import { updateFunctionProperty } from "actions/jsPaneActions";
+import type { OnUpdateSettingsProps } from "./JSEditorToolbar";
+import { saveJSObjectName } from "actions/jsActionActions";
 const LoadingContainer = styled(CenteredWrapper)`
   height: 50%;
 `;
-interface ReduxStateProps {
-  jsCollection: JSCollection | undefined;
-  isCreating: boolean;
-}
 
-type Props = ReduxStateProps &
-  RouteComponentProps<{ apiId: string; pageId: string }>;
+type Props = RouteComponentProps<{
+  apiId: string;
+  basePageId: string;
+  baseCollectionId: string;
+}>;
 
-class JSEditor extends React.Component<Props> {
-  render() {
-    const { isCreating, jsCollection } = this.props;
-    if (isCreating) {
-      return (
-        <LoadingContainer>
-          <Spinner size={30} />
-        </LoadingContainer>
-      );
+function JSEditor(props: Props) {
+  const { baseCollectionId } = props.match.params;
+  const pageId = useSelector(getCurrentPageId);
+  const dispatch = useDispatch();
+  const jsCollectionData = useSelector((state) =>
+    getJSCollectionDataByBaseId(state, baseCollectionId),
+  );
+  const { isCreating } = useSelector((state) => state.ui.jsPane);
+  const jsCollection = jsCollectionData?.config;
+
+  const contextMenu = useMemo(() => {
+    if (!jsCollection) {
+      return null;
     }
-    if (!!jsCollection) {
-      return <JsEditorForm jsCollection={jsCollection} />;
-    }
-    return <EntityNotFoundPane />;
+
+    return (
+      <AppJSEditorContextMenu jsCollection={jsCollection} pageId={pageId} />
+    );
+  }, [jsCollection, pageId]);
+
+  if (isCreating) {
+    return (
+      <LoadingContainer>
+        <Spinner size={30} />
+      </LoadingContainer>
+    );
   }
+
+  const onUpdateSettings = (props: OnUpdateSettingsProps) => {
+    dispatch(updateFunctionProperty(props));
+  };
+
+  if (!!jsCollection) {
+    return (
+      <JsEditorForm
+        contextMenu={contextMenu}
+        hideContextMenuOnEditor={Boolean(
+          jsCollectionData?.config.isMainJSCollection,
+        )}
+        hideEditIconOnEditor={Boolean(
+          jsCollectionData?.config.isMainJSCollection,
+        )}
+        jsCollectionData={jsCollectionData}
+        onUpdateSettings={onUpdateSettings}
+        saveJSObjectName={saveJSObjectName}
+      />
+    );
+  }
+
+  return <EntityNotFoundPane />;
 }
 
-const mapStateToProps = (state: AppState, props: Props): ReduxStateProps => {
-  const jsCollection = getJSCollectionById(state, props);
-  const { isCreating } = state.ui.jsPane;
-
-  return {
-    jsCollection,
-    isCreating: isCreating,
-  };
-};
-
-export default Sentry.withProfiler(connect(mapStateToProps)(JSEditor));
+export default Sentry.withProfiler(JSEditor);

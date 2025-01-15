@@ -1,5 +1,5 @@
-import { ValidationResponse } from "constants/WidgetValidation";
-import { MenuButtonWidgetProps } from "./constants";
+import type { ValidationResponse } from "constants/WidgetValidation";
+import type { MenuButtonWidgetProps } from "./constants";
 
 /**
  * Checks if the source data array
@@ -9,12 +9,19 @@ import { MenuButtonWidgetProps } from "./constants";
 export function sourceDataArrayValidation(
   options: unknown,
   props: MenuButtonWidgetProps,
+  // TODO: Fix this the next time the file is edited
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   _: any,
 ): ValidationResponse {
   const invalidResponse = {
     isValid: false,
     parsed: [],
-    messages: ["This value does not evaluate to type Array"],
+    messages: [
+      {
+        name: "TypeError",
+        message: "This value does not evaluate to type Array",
+      },
+    ],
   };
 
   try {
@@ -24,11 +31,14 @@ export function sourceDataArrayValidation(
 
     if (Array.isArray(options)) {
       let isValid = true;
-      let message = "";
+      let message = { name: "", message: "" };
 
       if (options.length > 10) {
         isValid = false;
-        message = "Source data cannot have more than 10 items";
+        message = {
+          name: "RangeError",
+          message: "Source data cannot have more than 10 items",
+        };
       }
 
       return {

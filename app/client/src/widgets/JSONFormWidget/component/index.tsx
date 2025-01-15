@@ -1,29 +1,34 @@
+import type { PropsWithChildren } from "react";
 import React, { Fragment } from "react";
 import styled from "styled-components";
 import { Text } from "@blueprintjs/core";
 
 import Form from "./Form";
-import WidgetStyleContainer, {
-  BoxShadow,
-} from "components/designSystems/appsmith/WidgetStyleContainer";
-import { Color } from "constants/Colors";
-import {
-  FIELD_MAP,
-  MAX_ALLOWED_FIELDS,
-  ROOT_SCHEMA_KEY,
-  Schema,
-} from "../constants";
+import type { BoxShadow } from "components/designSystems/appsmith/WidgetStyleContainer";
+import WidgetStyleContainer from "components/designSystems/appsmith/WidgetStyleContainer";
+import type { Color } from "constants/Colors";
+import type { Schema } from "../constants";
+import { FIELD_MAP, MAX_ALLOWED_FIELDS, ROOT_SCHEMA_KEY } from "../constants";
 import { FormContextProvider } from "../FormContext";
 import { isEmpty, pick } from "lodash";
-import { RenderMode, RenderModes, TEXT_SIZES } from "constants/WidgetConstants";
-import { Action, JSONFormWidgetState } from "../widget";
-import { ButtonStyleProps } from "widgets/ButtonWidget/component";
+import type { RenderMode } from "constants/WidgetConstants";
+import { RenderModes, TEXT_SIZES } from "constants/WidgetConstants";
+import type { Action, JSONFormWidgetState } from "../widget";
+import type { ButtonStyleProps } from "widgets/ButtonWidget/component";
+import { ConnectDataOverlay } from "widgets/ConnectDataOverlay";
+import {
+  JSON_FORM_CONNECT_BUTTON_TEXT,
+  JSON_FORM_CONNECT_OVERLAY_TEXT,
+} from "../constants/messages";
+import { createMessage } from "ee/constants/messages";
 
-type StyledContainerProps = {
+interface StyledContainerProps {
   backgroundColor?: string;
-};
+}
 
-export type JSONFormComponentProps<TValues = any> = {
+// TODO: Fix this the next time the file is edited
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export interface JSONFormComponentProps<TValues = any> {
   backgroundColor?: string;
   borderColor?: Color;
   borderRadius?: number;
@@ -35,8 +40,10 @@ export type JSONFormComponentProps<TValues = any> = {
   fieldLimitExceeded: boolean;
   fixedFooter: boolean;
   getFormData: () => TValues;
+  fixMessageHeight: boolean;
   isWidgetMounting: boolean;
   isSubmitting: boolean;
+  onConnectData: () => void;
   onFormValidityUpdate: (isValid: boolean) => void;
   onSubmit: (event: React.MouseEvent<HTMLElement, MouseEvent>) => void;
   registerResetObserver: (callback: () => void) => void;
@@ -54,37 +61,56 @@ export type JSONFormComponentProps<TValues = any> = {
   submitButtonStyles: ButtonStyleProps;
   title: string;
   updateFormData: (values: TValues) => void;
+  // TODO: Fix this the next time the file is edited
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   updateWidgetMetaProperty: (propertyName: string, propertyValue: any) => void;
+  // TODO: Fix this the next time the file is edited
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   updateWidgetProperty: (propertyName: string, propertyValue: any) => void;
   widgetId: string;
-};
+  showConnectDataOverlay?: boolean;
+}
 
 const StyledContainer = styled(WidgetStyleContainer)<StyledContainerProps>`
   background: ${({ backgroundColor }) => backgroundColor || "#fff"};
   overflow-y: auto;
 `;
 
-const MessageStateWrapper = styled.div`
+const MessageStateWrapper = styled.div<{ $fixHeight: boolean }>`
   align-items: center;
   display: flex;
-  height: 100%;
+  ${(props) => (props.$fixHeight ? "height: 303px" : "height: 100%")};
   justify-content: center;
 `;
 
-const Message = styled(Text)`
+type MessageProps = PropsWithChildren<{
+  $fixHeight: boolean;
+}>;
+
+const Message = styled(Text)<MessageProps>`
   font-size: ${TEXT_SIZES.HEADING3};
-  left: 50%;
-  position: absolute;
   text-align: center;
+  width: 100%;
+  left: 50%;
+  ${(props) =>
+    !props.$fixHeight
+      ? `position: absolute;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 100%;
+  `
+      : ""}
 `;
 
-function InfoMessage({ children }: { children: React.ReactNode }) {
+function InfoMessage({
+  children,
+  fixHeight,
+}: {
+  children: React.ReactNode;
+  fixHeight: boolean;
+}) {
   return (
-    <MessageStateWrapper>
-      <Message>{children}</Message>
+    <MessageStateWrapper $fixHeight={fixHeight}>
+      <Message $fixHeight={fixHeight}>{children}</Message>
     </MessageStateWrapper>
   );
 }
@@ -94,15 +120,18 @@ function JSONFormComponent<TValues>(
     backgroundColor,
     executeAction,
     fieldLimitExceeded,
+    fixMessageHeight,
     getFormData,
     isSubmitting,
     isWidgetMounting,
+    onConnectData,
     onFormValidityUpdate,
     registerResetObserver,
     renderMode,
     resetButtonLabel,
     schema,
     setMetaInternalFieldState,
+    showConnectDataOverlay,
     submitButtonLabel,
     unregisterResetObserver,
     updateFormData,
@@ -127,7 +156,7 @@ function JSONFormComponent<TValues>(
 
   const renderRootField = () => {
     const rootSchemaItem = schema[ROOT_SCHEMA_KEY];
-    const RootField = FIELD_MAP[rootSchemaItem.fieldType] || Fragment;
+    const RootField = FIELD_MAP[rootSchemaItem?.fieldType] || Fragment;
     const propertyPath = `schema.${ROOT_SCHEMA_KEY}`;
 
     return (
@@ -144,7 +173,7 @@ function JSONFormComponent<TValues>(
   const renderComponent = (() => {
     if (fieldLimitExceeded) {
       return (
-        <InfoMessage>
+        <InfoMessage fixHeight={fixMessageHeight}>
           Source data exceeds {MAX_ALLOWED_FIELDS} fields.&nbsp;
           {renderMode === RenderModes.PAGE
             ? "Please contact your developer for more information"
@@ -152,18 +181,23 @@ function JSONFormComponent<TValues>(
         </InfoMessage>
       );
     }
-    if (isSchemaEmpty) {
+
+    if (showConnectDataOverlay && isSchemaEmpty) {
       return (
-        <InfoMessage>
-          Connect data or paste JSON to add items to this form.
-        </InfoMessage>
+        <div style={{ height: "200px" }}>
+          <ConnectDataOverlay
+            btnText={createMessage(JSON_FORM_CONNECT_BUTTON_TEXT)}
+            message={createMessage(JSON_FORM_CONNECT_OVERLAY_TEXT)}
+            onConnectData={onConnectData}
+          />
+        </div>
       );
     }
 
     return renderRootField();
   })();
 
-  const hideFooter = fieldLimitExceeded || isSchemaEmpty;
+  const hideFooter = fieldLimitExceeded && !showConnectDataOverlay;
 
   return (
     <FormContextProvider

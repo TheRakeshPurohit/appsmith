@@ -1,20 +1,11 @@
 import React, { useEffect } from "react";
 import { connect, useDispatch } from "react-redux";
-import { withRouter, RouteComponentProps, Link } from "react-router-dom";
-import {
-  change,
-  reduxForm,
-  InjectedFormProps,
-  formValueSelector,
-} from "redux-form";
+import type { RouteComponentProps } from "react-router-dom";
+import { withRouter } from "react-router-dom";
+import type { InjectedFormProps } from "redux-form";
+import { change, reduxForm, formValueSelector } from "redux-form";
 import StyledForm from "components/editorComponents/Form";
-import {
-  FormActions,
-  BlackAuthCardNavLink,
-  FormMessagesContainer,
-} from "./StyledComponents";
-import { withTheme } from "styled-components";
-import { Theme } from "constants/DefaultTheme";
+import { FormActions, FormMessagesContainer } from "./StyledComponents";
 import {
   FORGOT_PASSWORD_PAGE_EMAIL_INPUT_LABEL,
   FORGOT_PASSWORD_PAGE_EMAIL_INPUT_PLACEHOLDER,
@@ -23,31 +14,31 @@ import {
   FORM_VALIDATION_EMPTY_EMAIL,
   FORM_VALIDATION_INVALID_EMAIL,
   FORGOT_PASSWORD_SUCCESS_TEXT,
-  FORGOT_PASSWORD_PAGE_LOGIN_LINK,
   createMessage,
-} from "@appsmith/constants/messages";
+  FORGOT_PASSWORD_PAGE_SUB_TITLE,
+} from "ee/constants/messages";
 import { AUTH_LOGIN_URL } from "constants/routes";
-import { FORGOT_PASSWORD_FORM_NAME } from "@appsmith/constants/forms";
+import { FORGOT_PASSWORD_FORM_NAME } from "ee/constants/forms";
 import FormTextField from "components/utils/ReduxFormTextField";
-import { Button, FormGroup, FormMessage, Size } from "design-system";
-import { Icon } from "@blueprintjs/core";
+import { FormGroup } from "@appsmith/ads-old";
+import { Button, Link, Callout, Icon } from "@appsmith/ads";
 import { isEmail, isEmptyString } from "utils/formhelpers";
-import {
-  ForgotPasswordFormValues,
-  forgotPasswordSubmitHandler,
-} from "./helpers";
-import { getAppsmithConfigs } from "@appsmith/configs";
+import type { ForgotPasswordFormValues } from "./helpers";
+import { forgotPasswordSubmitHandler } from "./helpers";
+import { getAppsmithConfigs } from "ee/configs";
 import Container from "./Container";
 
 const { mailEnabled } = getAppsmithConfigs();
 
 const validate = (values: ForgotPasswordFormValues) => {
   const errors: ForgotPasswordFormValues = {};
+
   if (!values.email || isEmptyString(values.email)) {
     errors.email = createMessage(FORM_VALIDATION_EMPTY_EMAIL);
   } else if (!isEmail(values.email)) {
     errors.email = createMessage(FORM_VALIDATION_INVALID_EMAIL);
   }
+
   return errors;
 };
 
@@ -57,109 +48,95 @@ type ForgotPasswordProps = InjectedFormProps<
 > &
   RouteComponentProps<{ email: string }> & { emailValue: string };
 
-export const ForgotPassword = withTheme(
-  (props: ForgotPasswordProps & { theme: Theme }) => {
-    const {
-      error,
-      handleSubmit,
-      submitFailed,
-      submitSucceeded,
-      submitting,
-    } = props;
-    const dispatch = useDispatch();
+export const ForgotPassword = (props: ForgotPasswordProps) => {
+  const { error, handleSubmit, submitFailed, submitSucceeded, submitting } =
+    props;
+  const dispatch = useDispatch();
 
-    useEffect(() => {
-      if (submitSucceeded) {
-        props.reset();
-        dispatch(change(FORGOT_PASSWORD_FORM_NAME, "email", ""));
-      }
-    }, [props.emailValue]);
+  useEffect(() => {
+    if (submitSucceeded) {
+      props.reset();
+      dispatch(change(FORGOT_PASSWORD_FORM_NAME, "email", ""));
+    }
+  }, [props.emailValue]);
 
-    return (
-      <Container
-        subtitle={
-          <BlackAuthCardNavLink className="text-sm" to={AUTH_LOGIN_URL}>
-            <Icon
-              icon="arrow-left"
-              style={{ marginRight: props.theme.spaces[3] }}
-            />
-            {createMessage(FORGOT_PASSWORD_PAGE_LOGIN_LINK)}
-          </BlackAuthCardNavLink>
-        }
-        title={createMessage(FORGOT_PASSWORD_PAGE_TITLE)}
+  const footerSection = (
+    <div className="px-2 flex items-center justify-center text-center text-[color:var(--ads-v2\-color-fg)] text-[14px]">
+      <Icon name="arrow-left-line" size="md" />
+      &nbsp;Back to&nbsp;
+      <Link
+        className="text-sm justify-center"
+        kind="primary"
+        target="_self"
+        to={AUTH_LOGIN_URL}
       >
-        <FormMessagesContainer>
-          {submitSucceeded && (
-            <FormMessage
-              intent="lightSuccess"
-              message={createMessage(
-                FORGOT_PASSWORD_SUCCESS_TEXT,
-                props.emailValue,
-              )}
-            />
-          )}
-          {!mailEnabled && (
-            <FormMessage
-              actions={[
-                {
-                  linkElement: (
-                    <a
-                      href="https://docs.appsmith.com/v/v1.2.1/setup/docker/email"
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      Configure Email service
-                    </a>
-                  ),
-                  text: "Configure Email service",
-                  intent: "primary",
-                },
-              ]}
-              intent="warning"
-              linkAs={Link}
-              message={
-                "You haven’t setup any email service yet. Please configure your email service to receive a reset link"
-              }
-            />
-          )}
-          {submitFailed && error && (
-            <FormMessage intent="warning" message={error} />
-          )}
-        </FormMessagesContainer>
-        <StyledForm onSubmit={handleSubmit(forgotPasswordSubmitHandler)}>
-          <FormGroup
-            intent={error ? "danger" : "none"}
-            label={createMessage(FORGOT_PASSWORD_PAGE_EMAIL_INPUT_LABEL)}
+        Sign in
+      </Link>
+    </div>
+  );
+
+  return (
+    <Container
+      footer={footerSection}
+      subtitle={createMessage(FORGOT_PASSWORD_PAGE_SUB_TITLE)}
+      title={createMessage(FORGOT_PASSWORD_PAGE_TITLE)}
+    >
+      <FormMessagesContainer>
+        {submitSucceeded && (
+          <Callout kind="success">
+            {createMessage(FORGOT_PASSWORD_SUCCESS_TEXT, props.emailValue)}
+          </Callout>
+        )}
+        {!mailEnabled && (
+          <Callout
+            kind="warning"
+            links={[
+              {
+                to: "https://docs.appsmith.com/getting-started/setup/instance-configuration/email#configure-email",
+                target: "_blank",
+                children: "Configure email service",
+              },
+            ]}
           >
-            <FormTextField
-              disabled={submitting}
-              name="email"
-              placeholder={createMessage(
-                FORGOT_PASSWORD_PAGE_EMAIL_INPUT_PLACEHOLDER,
-              )}
-            />
-          </FormGroup>
-          <FormActions>
-            <Button
-              disabled={!isEmail(props.emailValue)}
-              fill
-              isLoading={submitting}
-              size={Size.large}
-              tag="button"
-              text={createMessage(FORGOT_PASSWORD_PAGE_SUBMIT_BUTTON_TEXT)}
-              type="submit"
-            />
-          </FormActions>
-        </StyledForm>
-      </Container>
-    );
-  },
-);
+            You haven’t setup any email service yet. Please configure your email
+            service to receive a reset link
+          </Callout>
+        )}
+        {submitFailed && error && <Callout kind="warning">{error}</Callout>}
+      </FormMessagesContainer>
+      <StyledForm onSubmit={handleSubmit(forgotPasswordSubmitHandler)}>
+        <FormGroup
+          intent={error ? "danger" : "none"}
+          label={createMessage(FORGOT_PASSWORD_PAGE_EMAIL_INPUT_LABEL)}
+        >
+          <FormTextField
+            disabled={submitting}
+            name="email"
+            placeholder={createMessage(
+              FORGOT_PASSWORD_PAGE_EMAIL_INPUT_PLACEHOLDER,
+            )}
+          />
+        </FormGroup>
+        <FormActions>
+          <Button
+            isDisabled={!isEmail(props.emailValue)}
+            isLoading={submitting}
+            size="md"
+            type="submit"
+          >
+            {createMessage(FORGOT_PASSWORD_PAGE_SUBMIT_BUTTON_TEXT)}
+          </Button>
+        </FormActions>
+      </StyledForm>
+    </Container>
+  );
+};
 
 const selector = formValueSelector(FORGOT_PASSWORD_FORM_NAME);
 
 export default connect((state, props: ForgotPasswordProps) => {
   const queryParams = new URLSearchParams(props.location.search);
+
   return {
     initialValues: {
       email: queryParams.get("email") || "",

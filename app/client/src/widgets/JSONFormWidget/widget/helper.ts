@@ -1,51 +1,54 @@
 import equal from "fast-deep-equal/es6";
 import { difference, isEmpty } from "lodash";
 import log from "loglevel";
-import AnalyticsUtil from "utils/AnalyticsUtil";
+import AnalyticsUtil from "ee/utils/AnalyticsUtil";
 
 import { isDynamicValue } from "utils/DynamicBindingUtils";
-import { MetaInternalFieldState } from ".";
+import type { MetaInternalFieldState } from ".";
+import type {
+  FieldState,
+  FieldThemeStylesheet,
+  JSON,
+  Schema,
+  SchemaItem,
+} from "../constants";
 import {
   ARRAY_ITEM_KEY,
   AUTO_JS_ENABLED_FIELDS,
-  FieldState,
-  FieldThemeStylesheet,
   FieldType,
-  JSON,
   MAX_ALLOWED_FIELDS,
-  Schema,
-  SchemaItem,
 } from "../constants";
 import { countFields } from "../helper";
 import SchemaParser from "../schemaParser";
 
-type FieldStateItem = {
+interface FieldStateItem {
   isRequired?: boolean;
   isVisible?: boolean;
   isDisabled?: boolean;
   isValid?: boolean;
   filterText?: string;
-};
+}
 
 type MetaFieldState = FieldState<FieldStateItem>;
 
 type PathList = Array<{ key: string }>;
-type ComputedSchema = {
+interface ComputedSchema {
   status: ComputedSchemaStatus;
   schema: Schema;
   dynamicPropertyPathList?: PathList;
   modifiedSchemaItems: Record<string, SchemaItem>;
   removedSchemaItems: string[];
-};
+}
 
-type ComputeSchemaProps = {
+interface ComputeSchemaProps {
   currSourceData?: JSON;
   prevSourceData?: JSON;
   prevSchema?: Schema;
   widgetName: string;
   currentDynamicPropertyPathList?: PathList;
   fieldThemeStylesheets: FieldThemeStylesheet;
-};
+  prevDynamicPropertyPathList?: PathList;
+}
 
 export enum ComputedSchemaStatus {
   LIMIT_EXCEEDED = "LIMIT_EXCEEDED",
@@ -73,12 +76,15 @@ export const getGrandParentPropertyPath = (propertyPath: string) => {
 // that deals with object field type.
 const processFieldObject = (
   schema: Schema,
+  // TODO: Fix this the next time the file is edited
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   metaInternalFieldState: Record<string, any> = {},
 ) => {
   const obj: Record<string, FieldStateItem> = {};
 
   Object.values(schema).forEach((schemaItem) => {
     const { accessor, identifier } = schemaItem;
+
     obj[accessor] = processFieldSchemaItem(
       schemaItem,
       metaInternalFieldState[identifier],
@@ -196,6 +202,7 @@ export const generateFieldState = (
   metaFieldState: MetaInternalFieldState,
 ) => {
   let fieldState = {};
+
   if (schema) {
     Object.values(schema).forEach((schemaItem) => {
       fieldState = processFieldSchemaItem(schemaItem, metaFieldState);
@@ -211,12 +218,14 @@ export const dynamicPropertyPathListFromSchema = (
   basePath = "schema",
 ) => {
   const paths: string[] = [];
+
   Object.values(schema).forEach((schemaItem) => {
     const properties = AUTO_JS_ENABLED_FIELDS[schemaItem.fieldType];
 
     if (properties) {
       properties.forEach((property) => {
         const propertyValue = schemaItem[property];
+
         if (isDynamicValue(propertyValue)) {
           paths.push(`${basePath}.${schemaItem.identifier}.${property}`);
         }
@@ -228,6 +237,7 @@ export const dynamicPropertyPathListFromSchema = (
         schemaItem.children,
         `${basePath}.${schemaItem.identifier}.children`,
       );
+
       paths.push(...nestedPaths);
     }
   });
@@ -243,10 +253,11 @@ const computeDynamicPropertyPathList = (
   const pathListFromProps = (currentDynamicPropertyPathList || []).map(
     ({ key }) => key,
   );
-
   const newPaths = difference(pathListFromSchema, pathListFromProps);
 
-  return [...pathListFromProps, ...newPaths].map((path) => ({ key: path }));
+  return [...pathListFromProps, ...newPaths].map((path) => ({
+    key: path,
+  }));
 };
 
 /**
@@ -261,6 +272,7 @@ export const computeSchema = ({
   widgetName,
 }: ComputeSchemaProps): ComputedSchema => {
   // Hot path - early exit
+
   if (isEmpty(currSourceData) || equal(prevSourceData, currSourceData)) {
     return {
       status: ComputedSchemaStatus.UNCHANGED,
@@ -271,6 +283,7 @@ export const computeSchema = ({
   }
 
   const count = countFields(currSourceData);
+
   if (count > MAX_ALLOWED_FIELDS) {
     AnalyticsUtil.logEvent("WIDGET_PROPERTY_UPDATE", {
       widgetType: "JSON_FORM_WIDGET",
@@ -293,15 +306,12 @@ export const computeSchema = ({
 
   const start = performance.now();
 
-  const {
-    modifiedSchemaItems,
-    removedSchemaItems,
-    schema,
-  } = SchemaParser.parse(widgetName, {
-    fieldThemeStylesheets,
-    currSourceData,
-    schema: prevSchema,
-  });
+  const { modifiedSchemaItems, removedSchemaItems, schema } =
+    SchemaParser.parse(widgetName, {
+      fieldThemeStylesheets,
+      currSourceData,
+      schema: prevSchema,
+    });
 
   log.debug(
     "JSONForm widget schema parsing took",

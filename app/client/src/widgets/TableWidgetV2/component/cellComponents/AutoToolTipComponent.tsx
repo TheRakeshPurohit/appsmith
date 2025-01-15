@@ -1,10 +1,14 @@
-import React, { createRef, useEffect, useState } from "react";
 import { Tooltip } from "@blueprintjs/core";
-import { CellWrapper, TooltipContentWrapper } from "../TableStyledWrappers";
-import { CellAlignment, VerticalAlignment } from "../Constants";
-import { ReactComponent as OpenNewTabIcon } from "assets/icons/control/open-new-tab.svg";
+import { importSvg } from "@appsmith/ads-old";
+import React, { createRef, useEffect, useState } from "react";
 import styled from "styled-components";
 import { ColumnTypes } from "widgets/TableWidgetV2/constants";
+import type { CellAlignment, VerticalAlignment } from "../Constants";
+import { CellWrapper, TooltipContentWrapper } from "../TableStyledWrappers";
+
+const OpenNewTabIcon = importSvg(
+  async () => import("assets/icons/control/open-new-tab.svg"),
+);
 
 export const OpenNewTabIconWrapper = styled.div`
   left: 4px;
@@ -28,41 +32,102 @@ export const Content = styled.span`
 `;
 
 const WIDTH_OFFSET = 32;
-const MAX_WIDTH = 300;
+const MAX_WIDTH = 500;
+const TOOLTIP_OPEN_DELAY = 500;
+const MAX_CHARS_ALLOWED_IN_TOOLTIP = 200;
+
+export function isButtonTextTruncated(element: HTMLElement): boolean {
+  const spanElement = element.querySelector("span");
+
+  if (!spanElement) {
+    return false;
+  }
+
+  const offsetWidth = spanElement.offsetWidth;
+  const scrollWidth = spanElement.scrollWidth;
+
+  return scrollWidth > offsetWidth;
+}
 
 function useToolTip(
   children: React.ReactNode,
-  tableWidth?: number,
   title?: string,
+  isButton?: boolean,
 ) {
   const ref = createRef<HTMLDivElement>();
-  const [showTooltip, updateToolTip] = useState(false);
+  const [requiresTooltip, setRequiresTooltip] = useState(false);
 
-  useEffect(() => {
-    const element = ref.current?.querySelector("div") as HTMLDivElement;
+  useEffect(
+    function setupMouseHandlers() {
+      let timeout: ReturnType<typeof setTimeout>;
+      const currentRef = ref.current;
 
-    if (element && element.offsetWidth < element.scrollWidth) {
-      updateToolTip(true);
-    } else {
-      updateToolTip(false);
-    }
-  }, [children]);
+      if (!currentRef) return;
 
-  return showTooltip && children ? (
+      const mouseEnterHandler = () => {
+        timeout = setTimeout(() => {
+          const element = currentRef?.querySelector("div") as HTMLDivElement;
+
+          /*
+           * Using setTimeout to simulate hoverOpenDelay of the tooltip
+           * during initial render
+           */
+          if (element && element.offsetWidth < element.scrollWidth) {
+            setRequiresTooltip(true);
+          } else if (isButton && element && isButtonTextTruncated(element)) {
+            setRequiresTooltip(true);
+          } else {
+            setRequiresTooltip(false);
+          }
+
+          currentRef?.removeEventListener("mouseenter", mouseEnterHandler);
+          currentRef?.removeEventListener("mouseleave", mouseLeaveHandler);
+        }, TOOLTIP_OPEN_DELAY);
+      };
+
+      const mouseLeaveHandler = () => {
+        setRequiresTooltip(false);
+        clearTimeout(timeout);
+      };
+
+      currentRef?.addEventListener("mouseenter", mouseEnterHandler);
+      currentRef?.addEventListener("mouseleave", mouseLeaveHandler);
+
+      return () => {
+        currentRef?.removeEventListener("mouseenter", mouseEnterHandler);
+        currentRef?.removeEventListener("mouseleave", mouseLeaveHandler);
+        clearTimeout(timeout);
+      };
+    },
+    [children, isButton, ref],
+  );
+
+  return requiresTooltip && children ? (
     <Tooltip
       autoFocus={false}
+      boundary="viewport"
       content={
-        <TooltipContentWrapper width={(tableWidth || MAX_WIDTH) - WIDTH_OFFSET}>
-          {title}
+        <TooltipContentWrapper width={MAX_WIDTH - WIDTH_OFFSET}>
+          {title && title.length > MAX_CHARS_ALLOWED_IN_TOOLTIP
+            ? `${title.substring(0, MAX_CHARS_ALLOWED_IN_TOOLTIP)} (...)`
+            : title}
         </TooltipContentWrapper>
       }
-      hoverOpenDelay={1000}
-      position="top"
+      defaultIsOpen
+      hoverOpenDelay={TOOLTIP_OPEN_DELAY}
+      position="bottom"
+      usePortal
     >
-      {<Content ref={ref}>{children}</Content>}
+      {
+        <Content className="t--table-cell-tooltip-target" ref={ref}>
+          {children}
+        </Content>
+      }
     </Tooltip>
   ) : (
-    <Content ref={ref}>{children}</Content>
+    <Content className="t--table-cell-tooltip-target" ref={ref}>
+      {children}
+    </Content>
   );
 }
 
@@ -72,7 +137,7 @@ interface Props {
   children: React.ReactNode;
   title: string;
   tableWidth?: number;
-  columnType?: string;
+  columnType?: ColumnTypes;
   className?: string;
   compactMode?: string;
   allowCellWrapping?: boolean;
@@ -87,43 +152,34 @@ interface Props {
   isCellDisabled?: boolean;
 }
 
-function LinkWrapper(props: Props) {
-  const content = useToolTip(props.children, props.tableWidth, props.title);
-
-  return (
-    <CellWrapper
-      allowCellWrapping={props.allowCellWrapping}
-      cellBackground={props.cellBackground}
-      className="cell-wrapper"
-      compactMode={props.compactMode}
-      fontStyle={props.fontStyle}
-      horizontalAlignment={props.horizontalAlignment}
-      isCellDisabled={props.isCellDisabled}
-      isCellVisible={props.isCellVisible}
-      isHidden={props.isHidden}
-      isHyperLink
-      isTextType
-      onClick={(e: React.MouseEvent<HTMLDivElement>) => {
-        e.stopPropagation();
-        window.open(props.url, "_blank");
-      }}
-      textColor={props.textColor}
-      textSize={props.textSize}
-      verticalAlignment={props.verticalAlignment}
-    >
-      <div className="link-text">{content}</div>
-      <OpenNewTabIconWrapper className="hidden-icon">
-        <OpenNewTabIcon />
-      </OpenNewTabIconWrapper>
-    </CellWrapper>
+export function AutoToolTipComponent(props: Props) {
+  const content = useToolTip(
+    props.children,
+    props.title,
+    props.columnType === ColumnTypes.BUTTON,
   );
-}
 
-function AutoToolTipComponent(props: Props) {
-  const content = useToolTip(props.children, props.tableWidth, props.title);
+  let contentToRender;
 
-  if (props.columnType === ColumnTypes.URL && props.title) {
-    return <LinkWrapper {...props} />;
+  switch (props.columnType) {
+    case ColumnTypes.BUTTON:
+      if (props.title) {
+        return content;
+      }
+
+      break;
+    case ColumnTypes.URL:
+      contentToRender = (
+        <>
+          <div className="link-text">{content}</div>
+          <OpenNewTabIconWrapper className="hidden-icon">
+            <OpenNewTabIcon />
+          </OpenNewTabIconWrapper>
+        </>
+      );
+      break;
+    default:
+      contentToRender = content;
   }
 
   return (
@@ -139,12 +195,13 @@ function AutoToolTipComponent(props: Props) {
         isCellDisabled={props.isCellDisabled}
         isCellVisible={props.isCellVisible}
         isHidden={props.isHidden}
+        isHyperLink={props.columnType === ColumnTypes.URL}
         isTextType
         textColor={props.textColor}
         textSize={props.textSize}
         verticalAlignment={props.verticalAlignment}
       >
-        {content}
+        {contentToRender}
       </CellWrapper>
     </ColumnWrapper>
   );

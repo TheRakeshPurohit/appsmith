@@ -1,34 +1,37 @@
-import { ReduxActionTypes } from "@appsmith/constants/ReduxActionConstants";
-import {
+import { ReduxActionTypes } from "ee/constants/ReduxActionConstants";
+import type {
   CodeEditorContext,
+  CursorPosition,
   EvaluatedPopupState,
   PropertyPanelContext,
-} from "reducers/uiReducers/editorContextReducer";
+} from "ee/reducers/uiReducers/editorContextReducer";
+import { CursorPositionOrigin } from "ee/reducers/uiReducers/editorContextReducer";
 
-export const setFocusableCodeEditorField = (path: string | undefined) => {
+export const setFocusableInputField = (path: string | undefined) => {
   return {
-    type: ReduxActionTypes.SET_FOCUSABLE_CODE_EDITOR_FIELD,
+    type: ReduxActionTypes.SET_FOCUSABLE_INPUT_FIELD,
     payload: { path },
   };
 };
 
 export const setCodeEditorCursorAction = (
   path: string,
-  cursorPosition: { ch: number; line: number },
+  cursorPosition: Omit<CursorPosition, "origin">,
+  origin: CursorPositionOrigin = CursorPositionOrigin.LastFocus,
 ) => {
   return {
     type: ReduxActionTypes.SET_CODE_EDITOR_CURSOR,
-    payload: { cursorPosition, path },
+    payload: { cursorPosition: { ...cursorPosition, origin }, path },
   };
 };
 
-export type CodeEditorFocusState = {
+export interface CodeEditorFocusState {
   key: string | undefined;
   cursorPosition: {
     ch: number;
     line: number;
   };
-};
+}
 
 export const setEditorFieldFocusAction = (payload: CodeEditorFocusState) => {
   return {
@@ -79,13 +82,6 @@ export const setSelectedPropertyTabIndex = (
   return {
     type: ReduxActionTypes.SET_SELECTED_PROPERTY_TAB_INDEX,
     payload: { index: selectedIndex, panelPropertyPath },
-  };
-};
-
-export const setCanvasDebuggerSelectedTab = (selectedTab: string) => {
-  return {
-    type: ReduxActionTypes.SET_CANVAS_DEBUGGER_SELECTED_TAB,
-    payload: selectedTab,
   };
 };
 

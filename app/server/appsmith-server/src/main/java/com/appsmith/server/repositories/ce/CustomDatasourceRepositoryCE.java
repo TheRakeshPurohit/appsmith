@@ -1,14 +1,12 @@
 package com.appsmith.server.repositories.ce;
 
 import com.appsmith.external.models.Datasource;
-import com.appsmith.external.models.DatasourceStructure;
 import com.appsmith.server.acl.AclPermission;
 import com.appsmith.server.repositories.AppsmithRepository;
-import com.mongodb.client.result.UpdateResult;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.util.Set;
+import java.util.List;
 
 public interface CustomDatasourceRepositoryCE extends AppsmithRepository<Datasource> {
 
@@ -16,10 +14,7 @@ public interface CustomDatasourceRepositoryCE extends AppsmithRepository<Datasou
 
     Mono<Datasource> findByNameAndWorkspaceId(String name, String workspaceId, AclPermission aclPermission);
 
-    Mono<Datasource> findById(String id, AclPermission aclPermission);
+    Flux<Datasource> findByIdIn(List<String> ids);
 
-    Flux<Datasource> findAllByIds(Set<String> ids, AclPermission permission);
-
-    Mono<UpdateResult> saveStructure(String datasourceId, DatasourceStructure structure);
-
+    Mono<Long> countByDeletedAtNull();
 }

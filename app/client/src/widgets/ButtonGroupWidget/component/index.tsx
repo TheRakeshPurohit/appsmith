@@ -1,4 +1,5 @@
-import React, { RefObject, createRef } from "react";
+import type { RefObject } from "react";
+import React, { createRef } from "react";
 import { sortBy } from "lodash";
 import {
   Alignment,
@@ -9,15 +10,15 @@ import {
   Spinner,
 } from "@blueprintjs/core";
 import { Classes, Popover2 } from "@blueprintjs/popover2";
-import { IconName } from "@blueprintjs/icons";
+import type { IconName } from "@blueprintjs/icons";
 import tinycolor from "tinycolor2";
 import { darkenActive, darkenHover } from "constants/DefaultTheme";
-import {
+import type {
   ButtonStyleType,
   ButtonVariant,
-  ButtonVariantTypes,
   ButtonPlacement,
 } from "components/constants";
+import { ButtonVariantTypes } from "components/constants";
 import styled, { createGlobalStyle } from "styled-components";
 import {
   getCustomBackgroundColor,
@@ -25,11 +26,12 @@ import {
   getCustomJustifyContent,
   getComplementaryGrayscaleColor,
 } from "widgets/WidgetUtils";
-import { RenderMode, RenderModes } from "constants/WidgetConstants";
+import type { RenderMode } from "constants/WidgetConstants";
+import { RenderModes } from "constants/WidgetConstants";
 import { DragContainer } from "widgets/ButtonWidget/component/DragContainer";
 import { buttonHoverActiveStyles } from "../../ButtonWidget/component/utils";
 import { THEMEING_TEXT_SIZES } from "constants/ThemeConstants";
-import { ThemeProp } from "widgets/constants";
+import type { ThemeProp } from "WidgetProvider/constants";
 
 // Utility functions
 interface ButtonData {
@@ -38,6 +40,7 @@ interface ButtonData {
   label?: string;
   iconName?: string;
 }
+
 // Extract props influencing to width change
 const getButtonData = (
   groupButtons: Record<string, GroupButtonProps>,
@@ -153,6 +156,8 @@ interface ButtonStyleProps {
   iconAlign?: string;
   placement?: ButtonPlacement;
   isLabel: boolean;
+  minWidth?: number;
+  minHeight?: number;
 }
 
 /*
@@ -181,8 +186,14 @@ const StyledButton = styled.button<ThemeProp & ButtonStyleProps>`
   align-items: center;
   padding: 0px 10px;
 
+  ${({ minHeight, minWidth }) => `
+    ${minWidth ? `min-width: ${minWidth}px;` : ""}
+    ${minHeight ? `min-height: ${minHeight}px;` : ""}
+  `};
+
   &:hover,
-  &:active {
+  &:active,
+  &:focus {
     ${buttonHoverActiveStyles}
   }
 
@@ -192,8 +203,8 @@ const StyledButton = styled.button<ThemeProp & ButtonStyleProps>`
         getCustomBackgroundColor(buttonVariant, buttonColor) !== "none"
           ? getCustomBackgroundColor(buttonVariant, buttonColor)
           : buttonVariant === ButtonVariantTypes.PRIMARY
-          ? theme.colors.button.primary.primary.bgColor
-          : "none"
+            ? theme.colors.button.primary.primary.bgColor
+            : "none"
       } !important;
       flex-direction : ${iconAlign === "right" ? "row-reverse" : "row"};
       .bp3-icon {
@@ -211,8 +222,8 @@ const StyledButton = styled.button<ThemeProp & ButtonStyleProps>`
       getCustomBorderColor(buttonVariant, buttonColor) !== "none"
         ? `1px solid ${getCustomBorderColor(buttonVariant, buttonColor)}`
         : buttonVariant === ButtonVariantTypes.SECONDARY
-        ? `1px solid ${theme.colors.button.primary.secondary.borderColor}`
-        : "none"
+          ? `1px solid ${theme.colors.button.primary.secondary.borderColor}`
+          : "none"
     } ${buttonVariant === ButtonVariantTypes.PRIMARY ? "" : "!important"};
 
     & span {
@@ -226,10 +237,14 @@ const StyledButton = styled.button<ThemeProp & ButtonStyleProps>`
 
     &:disabled {
       cursor: not-allowed;
-      border: ${buttonVariant === ButtonVariantTypes.SECONDARY &&
-        "1px solid var(--wds-color-border-disabled)"} !important;
-      background: ${buttonVariant !== ButtonVariantTypes.TERTIARY &&
-        "var(--wds-color-bg-disabled)"} !important;
+      border: ${
+        buttonVariant === ButtonVariantTypes.SECONDARY &&
+        "1px solid var(--wds-color-border-disabled)"
+      } !important;
+      background: ${
+        buttonVariant !== ButtonVariantTypes.TERTIARY &&
+        "var(--wds-color-bg-disabled)"
+      } !important;
 
       span {
         color: var(--wds-color-text-disabled) !important;
@@ -268,7 +283,7 @@ const BaseMenuItem = styled(MenuItem)<ThemeProp & BaseStyleProps>`
     backgroundColor
       ? `
       background-color: ${backgroundColor} !important;
-      &:hover {
+      &:hover, &:focus {
         background-color: ${darkenHover(backgroundColor)} !important;
       }
       &:active {
@@ -277,7 +292,7 @@ const BaseMenuItem = styled(MenuItem)<ThemeProp & BaseStyleProps>`
   `
       : `
     background: none !important
-      &:hover {
+      &:hover, &:focus {
         background-color: ${tinycolor(
           theme.colors.button.primary.primary.textColor,
         )
@@ -332,6 +347,7 @@ function PopoverContent(props: PopoverContentProps) {
   let items = Object.keys(menuItems)
     .map((itemKey) => menuItems[itemKey])
     .filter((item) => item.isVisible === true);
+
   // sort btns by index
   items = sortBy(items, ["index"]);
 
@@ -347,25 +363,22 @@ function PopoverContent(props: PopoverContentProps) {
       onClick,
       textColor,
     } = menuItem;
-    if (iconAlign === Alignment.RIGHT) {
-      return (
-        <BaseMenuItem
-          backgroundColor={backgroundColor}
-          disabled={isDisabled}
-          key={id}
-          labelElement={<Icon color={iconColor} icon={iconName} />}
-          onClick={() => onItemClicked(onClick, buttonId)}
-          text={label}
-          textColor={textColor}
-        />
-      );
-    }
+
     return (
       <BaseMenuItem
         backgroundColor={backgroundColor}
         disabled={isDisabled}
-        icon={<Icon color={iconColor} icon={iconName} />}
+        icon={
+          iconAlign !== Alignment.RIGHT && iconName ? (
+            <Icon color={iconColor} icon={iconName} />
+          ) : null
+        }
         key={id}
+        labelElement={
+          iconAlign === Alignment.RIGHT && iconName ? (
+            <Icon color={iconColor} icon={iconName} />
+          ) : null
+        }
         onClick={() => onItemClicked(onClick, buttonId)}
         text={label}
         textColor={textColor}
@@ -421,6 +434,7 @@ class ButtonGroupComponent extends React.Component<
       if (this.timer) {
         clearTimeout(this.timer);
       }
+
       this.timer = setTimeout(() => {
         this.setState(() => {
           return {
@@ -483,6 +497,7 @@ class ButtonGroupComponent extends React.Component<
           [id]: this.state.itemRefs[id].current?.getBoundingClientRect().width,
         };
       }
+
       return acc;
     }, {});
 
@@ -495,6 +510,7 @@ class ButtonGroupComponent extends React.Component<
           [id]: createRef(),
         };
       }
+
       return acc;
     }, {});
 
@@ -534,9 +550,18 @@ class ButtonGroupComponent extends React.Component<
     let items = Object.keys(groupButtons)
       .map((itemKey) => groupButtons[itemKey])
       .filter((item) => item.isVisible === true);
+
     // sort btns by index
     items = sortBy(items, ["index"]);
     const popoverId = `button-group-${widgetId}`;
+
+    const getOnClick = (button: GroupButtonProps) => {
+      if (!button.onClick) return;
+
+      return () => {
+        this.onButtonClick(button.onClick, button.id);
+      };
+    };
 
     return (
       <ButtonGroupWrapper
@@ -550,6 +575,7 @@ class ButtonGroupComponent extends React.Component<
           const isLoading = button.id === loadedBtnId;
           const isButtonDisabled =
             button.isDisabled || isDisabled || !!loadedBtnId || isLoading;
+
           if (button.buttonType === "MENU" && !isButtonDisabled) {
             const { menuItems } = button;
 
@@ -594,6 +620,8 @@ class ButtonGroupComponent extends React.Component<
                       isHorizontal={isHorizontal}
                       isLabel={!!button.label}
                       key={button.id}
+                      minHeight={this.props.minHeight}
+                      minWidth={this.props.buttonMinWidth}
                       ref={this.state.itemRefs[button.id]}
                     >
                       <StyledButtonContent
@@ -619,6 +647,7 @@ class ButtonGroupComponent extends React.Component<
               </MenuButtonWrapper>
             );
           }
+
           return (
             <DragContainer
               buttonColor={button.buttonColor}
@@ -626,9 +655,7 @@ class ButtonGroupComponent extends React.Component<
               disabled={isButtonDisabled}
               key={button.id}
               loading={!!loadedBtnId}
-              onClick={() => {
-                this.onButtonClick(button.onClick, button.id);
-              }}
+              onClick={getOnClick(button)}
               renderMode={this.props.renderMode}
               style={{ flex: "1 1 auto" }}
             >
@@ -640,7 +667,9 @@ class ButtonGroupComponent extends React.Component<
                 iconAlign={button.iconAlign}
                 isHorizontal={isHorizontal}
                 isLabel={!!button.label}
-                onClick={() => this.onButtonClick(button.onClick, button.id)}
+                minHeight={this.props.minHeight}
+                minWidth={this.props.buttonMinWidth}
+                onClick={getOnClick(button)}
               >
                 <StyledButtonContent
                   iconAlign={button.iconAlign || "left"}
@@ -715,6 +744,8 @@ export interface ButtonGroupComponentProps {
   width: number;
   minPopoverWidth: number;
   widgetId: string;
+  buttonMinWidth?: number;
+  minHeight?: number;
 }
 
 export interface ButtonGroupComponentState {

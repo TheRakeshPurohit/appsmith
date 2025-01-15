@@ -1,21 +1,23 @@
-import React from "react";
+import React, { useCallback, useMemo } from "react";
+import styled from "styled-components";
 import SelectComponent from "widgets/SelectWidget/component";
-import { DropdownOption } from "widgets/SelectWidget/constants";
+import type { DropdownOption } from "widgets/SelectWidget/constants";
+import type { EditableCellActions } from "widgets/TableWidgetV2/constants";
+import type { BaseCellComponentProps } from "../Constants";
 import {
-  BaseCellComponentProps,
   EDITABLE_CELL_PADDING_OFFSET,
   TABLE_SIZES,
+  TableSelectColumnOptionKeys,
 } from "../Constants";
 import { CellWrapper } from "../TableStyledWrappers";
-import styled from "constants/DefaultTheme";
-import { EditableCellActions } from "widgets/TableWidgetV2/constants";
 import { BasicCell } from "./BasicCell";
-import { useCallback } from "react";
+import type { ColumnTypes } from "widgets/TableWidget/component/Constants";
 
 const StyledSelectComponent = styled(SelectComponent)<{
   accentColor: string;
   height: number;
   isNewRow: boolean;
+  isValid: boolean;
 }>`
   &&& {
     width: ${(props) =>
@@ -35,7 +37,6 @@ const StyledSelectComponent = styled(SelectComponent)<{
       }
 
       & button.bp3-button {
-        border-color: #fff;
         padding: 0 9px;
         min-height: ${(props) => {
           return props.isNewRow
@@ -61,9 +62,9 @@ type SelectProps = BaseCellComponentProps & {
   alias: string;
   accentColor: string;
   autoOpen: boolean;
-  columnType: string;
+  columnType: ColumnTypes;
   borderRadius: string;
-  options: DropdownOption[];
+  options?: DropdownOption[];
   onFilterChange: (
     text: string,
     rowIndex: number,
@@ -80,6 +81,7 @@ type SelectProps = BaseCellComponentProps & {
   value: string;
   width: number;
   isEditable: boolean;
+  isEditableCellValid: boolean;
   tableWidth: number;
   isCellEditable?: boolean;
   isCellEditMode?: boolean;
@@ -124,17 +126,18 @@ export const SelectCell = (props: SelectProps) => {
     fontStyle,
     hasUnsavedChanges,
     horizontalAlignment,
+    isCellDisabled,
     isCellEditable,
     isCellEditMode,
-    isCellDisabled,
     isCellVisible,
     isEditable,
+    isEditableCellValid,
     isFilterable = false,
     isHidden,
     isNewRow,
     onFilterChange,
-    onItemSelect,
     onFilterChangeActionString,
+    onItemSelect,
     onOptionSelectActionString,
     options = [],
     placeholderText,
@@ -187,9 +190,22 @@ export const SelectCell = (props: SelectProps) => {
 
   const onClick = useCallback((e) => e.stopPropagation(), []);
 
-  const selectedIndex = options
+  const selectedIndex = (Array.isArray(options) ? options : [])
+    .filter((d: DropdownOption) => d)
     .map((d: DropdownOption) => d.value)
     .indexOf(value);
+
+  const cellLabelValue = useMemo(() => {
+    if (!options.length) return value;
+
+    const selectedOption = options.find(
+      (option) => option[TableSelectColumnOptionKeys.VALUE] === value,
+    );
+
+    return selectedOption
+      ? selectedOption[TableSelectColumnOptionKeys.LABEL]
+      : value;
+  }, [value, options]);
 
   if (isEditable && isCellEditable && isCellEditMode) {
     return (
@@ -213,13 +229,14 @@ export const SelectCell = (props: SelectProps) => {
           compactMode
           dropDownWidth={width}
           filterText={filterText}
+          hasError={!isEditableCellValid}
           height={TABLE_SIZES[compactMode].ROW_HEIGHT}
           hideCancelIcon
           isFilterable={isFilterable}
           isLoading={false}
           isNewRow={isNewRow}
           isOpen={autoOpen}
-          isValid
+          isValid={isEditableCellValid}
           labelText=""
           onClose={onClose}
           onFilterChange={onFilter}
@@ -229,7 +246,7 @@ export const SelectCell = (props: SelectProps) => {
           resetFilterTextOnClose={resetFilterTextOnClose}
           selectedIndex={selectedIndex}
           serverSideFiltering={serverSideFiltering}
-          value={value}
+          value={cellLabelValue}
           widgetId={""}
           width={width}
         />
@@ -259,7 +276,7 @@ export const SelectCell = (props: SelectProps) => {
         tableWidth={tableWidth}
         textColor={textColor}
         textSize={textSize}
-        value={value}
+        value={cellLabelValue}
         verticalAlignment={verticalAlignment}
       />
     );

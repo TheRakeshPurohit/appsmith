@@ -1,34 +1,34 @@
 import React from "react";
 import { formValueSelector } from "redux-form";
 import { connect } from "react-redux";
-import BaseControl, { ControlProps } from "./BaseControl";
-import { ControlType } from "constants/PropertyControlConstants";
+import type { ControlProps } from "./BaseControl";
+import BaseControl from "./BaseControl";
+import type { ControlType } from "constants/PropertyControlConstants";
 import DynamicTextField from "components/editorComponents/form/fields/DynamicTextField";
 import {
   EditorSize,
   EditorModes,
   TabBehaviour,
 } from "components/editorComponents/CodeEditor/EditorConfig";
-import { QUERY_EDITOR_FORM_NAME } from "@appsmith/constants/forms";
-import { AppState } from "@appsmith/reducers";
+import { QUERY_EDITOR_FORM_NAME } from "ee/constants/forms";
+import type { AppState } from "ee/reducers";
 import styled from "styled-components";
-import { getPluginResponseTypes } from "selectors/entitiesSelector";
+import {
+  getPluginResponseTypes,
+  getPluginNameFromId,
+} from "ee/selectors/entitiesSelector";
 import { actionPathFromName } from "components/formControls/utils";
-import { EvaluationSubstitutionType } from "entities/DataTree/dataTreeFactory";
+import type { EvaluationSubstitutionType } from "entities/DataTree/dataTreeFactory";
+import { getSqlEditorModeFromPluginName } from "components/editorComponents/CodeEditor/sql/config";
+import { selectFeatureFlags } from "ee/selectors/featureFlagsSelectors";
+import { Flex } from "@appsmith/ads";
 
 const Wrapper = styled.div`
-  width: 872px;
-  .dynamic-text-field {
-    border-radius: 4px;
-    font-size: 14px;
-    min-height: calc(100vh / 4);
-  }
-
-  && {
-    .CodeMirror-lines {
-      padding: 10px;
-    }
-  }
+  min-width: 380px;
+  width: 100%;
+  min-height: 200px;
+  height: 100%;
+  display: flex;
 `;
 
 interface DynamicTextControlState {
@@ -56,29 +56,36 @@ class DynamicTextControl extends BaseControl<
       actionName,
       configProperty,
       evaluationSubstitutionType,
+      isActionRedesignEnabled,
       placeholderText,
+      pluginName,
       responseType,
     } = this.props;
     const dataTreePath = actionPathFromName(actionName, configProperty);
     const mode =
       responseType === "TABLE"
-        ? EditorModes.SQL_WITH_BINDING
+        ? getSqlEditorModeFromPluginName(pluginName)
         : EditorModes.JSON_WITH_BINDING;
 
     return (
-      <Wrapper className={`t--${configProperty}`}>
-        <DynamicTextField
-          className="dynamic-text-field"
-          dataTreePath={dataTreePath}
-          disabled={this.props.disabled}
-          evaluationSubstitutionType={evaluationSubstitutionType}
-          mode={mode}
-          name={this.props.configProperty}
-          placeholder={placeholderText}
-          showLineNumbers={this.props.showLineNumbers}
-          size={EditorSize.EXTENDED}
-          tabBehaviour={TabBehaviour.INDENT}
-        />
+      <Wrapper className={`t--${configProperty} dynamic-text-field-control`}>
+        <Flex flex="1">
+          <DynamicTextField
+            dataTreePath={dataTreePath}
+            disabled={this.props.disabled}
+            evaluatedPopUpLabel={this?.props?.label}
+            evaluationSubstitutionType={evaluationSubstitutionType}
+            height="100%"
+            mode={mode}
+            name={this.props.configProperty}
+            placeholder={placeholderText}
+            showLineNumbers={
+              isActionRedesignEnabled || this.props.showLineNumbers
+            }
+            size={EditorSize.EXTENDED}
+            tabBehaviour={TabBehaviour.INDENT}
+          />
+        </Flex>
       </Wrapper>
     );
   }
@@ -91,6 +98,8 @@ export interface DynamicTextFieldProps extends ControlProps {
   placeholderText?: string;
   evaluationSubstitutionType: EvaluationSubstitutionType;
   mutedHinting?: boolean;
+  pluginName: string;
+  isActionRedesignEnabled: boolean;
 }
 
 const mapStateToProps = (state: AppState, props: DynamicTextFieldProps) => {
@@ -100,11 +109,15 @@ const mapStateToProps = (state: AppState, props: DynamicTextFieldProps) => {
   const actionName = valueSelector(state, "name");
   const pluginId = valueSelector(state, "datasource.pluginId");
   const responseTypes = getPluginResponseTypes(state);
+  const pluginName = getPluginNameFromId(state, pluginId);
+  const { release_actions_redesign_enabled } = selectFeatureFlags(state);
 
   return {
     actionName,
     pluginId,
     responseType: responseTypes[pluginId],
+    pluginName,
+    isActionRedesignEnabled: release_actions_redesign_enabled,
   };
 };
 

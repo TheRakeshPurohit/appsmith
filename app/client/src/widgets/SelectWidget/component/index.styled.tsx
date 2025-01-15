@@ -1,18 +1,20 @@
+import type { PropsWithChildren } from "react";
 import { Classes, ControlGroup } from "@blueprintjs/core";
-import styled from "styled-components";
+import styled, { createGlobalStyle } from "styled-components";
 import { Colors } from "constants/Colors";
 
-import { DropdownOption } from "../constants";
+import type { DropdownOption } from "../constants";
 import { Select } from "@blueprintjs/select";
-import {
-  BlueprintCSSTransform,
-  createGlobalStyle,
-} from "constants/DefaultTheme";
+import { BlueprintCSSTransform } from "constants/DefaultTheme";
 import { isEmptyOrNill } from "../../../utils/helpers";
 import { LabelPosition, LABEL_MARGIN_OLD_SELECT } from "components/constants";
-import { labelLayoutStyles, LABEL_CONTAINER_CLASS } from "design-system";
+import {
+  labelLayoutStyles,
+  LABEL_CONTAINER_CLASS,
+} from "widgets/components/LabelWithTooltip";
 import { lightenColor } from "widgets/WidgetUtils";
 import { CommonSelectFilterStyle } from "widgets/MultiSelectWidgetV2/component/index.styled";
+import { CLASSNAMES } from "../constants";
 
 export const StyledDiv = styled.div`
   display: flex;
@@ -69,15 +71,20 @@ export const StyledControlGroup = styled(ControlGroup)<{
   }
 `;
 
-const SingleDropDown = Select.ofType<DropdownOption>();
-export const StyledSingleDropDown = styled(SingleDropDown)<{
+type StyledSingleDropDownProps = PropsWithChildren<{
   value: string;
   isValid: boolean;
   hasError?: boolean;
   borderRadius: string;
   boxShadow?: string;
   accentColor?: string;
-}>`
+}>;
+
+const SingleDropDown = Select.ofType<DropdownOption>();
+
+export const StyledSingleDropDown = styled(
+  SingleDropDown,
+)<StyledSingleDropDownProps>`
   div {
     flex: 1 1 auto;
   }
@@ -88,6 +95,7 @@ export const StyledSingleDropDown = styled(SingleDropDown)<{
       height: 100%;
     }
   }
+
   &&&& .${Classes.BUTTON} {
     display: flex;
     width: 100%;
@@ -214,23 +222,25 @@ ${({ dropDownWidth, id }) => `
 export const DropdownContainer = styled.div<{
   compactMode: boolean;
   labelPosition?: LabelPosition;
+  dropdownPopoverContainer?: string;
+  rtl?: boolean;
 }>`
   ${BlueprintCSSTransform}
   ${labelLayoutStyles}
 
   /**
     When the label is on the left it is not center aligned
-    here set height to auto and not 100% because the input 
+    here set height to auto and not 100% because the input
     has fixed height and stretch the container.
   */
     ${({ labelPosition }) => {
-      if (labelPosition === LabelPosition.Left) {
-        return `
+    if (labelPosition === LabelPosition.Left) {
+      return `
       height: auto !important;
       align-items: stretch;
       `;
-      }
-    }}
+    }
+  }}
 
   & .${LABEL_CONTAINER_CLASS} {
     label {
@@ -241,6 +251,49 @@ export const DropdownContainer = styled.div<{
       }};
     }
   }
+
+  ${(props) =>
+    props.rtl
+      ? `
+
+    .${LABEL_CONTAINER_CLASS} {
+      direction: rtl;
+    }
+
+    .${CLASSNAMES.selectButton} {
+      direction: rtl;
+
+      .bp3-button-text {
+        display: block;
+        direction: rtl;
+        text-align: right;
+        margin: 0;
+      }
+    }
+  `
+      : ``}
+`;
+
+export const RTLStyleContainer = createGlobalStyle<{
+  dropdownPopoverContainer: string;
+}>`
+  ${(props) => `
+  .${props.dropdownPopoverContainer} {
+    .bp3-input-group {
+      .bp3-icon-search {
+        left: auto !important;
+        right: 0;
+      }
+
+      input {
+        direction: rtl;
+        padding-left: 10px !important;
+        padding-right: 34px !important;
+      }
+    }
+  }
+`}
+
 `;
 
 export const MenuItem = styled.div<{

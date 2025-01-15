@@ -1,119 +1,88 @@
 package com.appsmith.server.configurations;
 
 import com.appsmith.server.constants.Appsmith;
-import com.appsmith.server.domains.Config;
-import com.appsmith.server.dtos.ResponseDTO;
-import com.appsmith.server.exceptions.AppsmithError;
-import com.appsmith.server.exceptions.AppsmithException;
+import com.appsmith.server.helpers.InstanceConfigHelper;
+import com.appsmith.server.repositories.CacheableRepositoryHelper;
 import com.appsmith.server.services.ConfigService;
-import com.appsmith.util.WebClientUtils;
+import io.micrometer.observation.annotation.Observed;
 import io.sentry.Sentry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationListener;
-import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
-import org.springframework.web.reactive.function.BodyInserters;
 import reactor.core.publisher.Mono;
 
-import java.util.Map;
-import java.util.Objects;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+import static java.lang.Boolean.TRUE;
 
 @Slf4j
 @RequiredArgsConstructor
 @Component
+@Observed(name = "serverStartup")
 public class InstanceConfig implements ApplicationListener<ApplicationReadyEvent> {
 
     private final ConfigService configService;
 
-    private final CloudServicesConfig cloudServicesConfig;
+    private final CacheableRepositoryHelper cacheableRepositoryHelper;
 
-    private final CommonConfig commonConfig;
+    private final InstanceConfigHelper instanceConfigHelper;
 
-    private boolean isRtsAccessible = false;
+    private static final String WWW_PATH = System.getenv("WWW_PATH");
 
     @Override
     public void onApplicationEvent(ApplicationReadyEvent applicationReadyEvent) {
-        configService.getByName(Appsmith.APPSMITH_REGISTERED)
-                .filter(config -> Boolean.TRUE.equals(config.getConfig().get("value")))
-                .switchIfEmpty(registerInstance())
-                .doOnError(errorSignal -> log.debug("Instance registration failed with error: \n{}", errorSignal.getMessage()))
-                .then(performRtsHealthCheck())
-                .doFinally(ignored -> this.printReady())
-                .subscribe(null, e -> {
-                    log.debug(e.getMessage());
-                    Sentry.captureException(e);
-                });
-    }
-
-    private Mono<? extends Config> registerInstance() {
-
-        log.debug("Triggering registration of this instance...");
-
-        final String baseUrl = cloudServicesConfig.getBaseUrl();
-        if (baseUrl == null || StringUtils.isEmpty(baseUrl)) {
-            return Mono.error(new AppsmithException(
-                    AppsmithError.INSTANCE_REGISTRATION_FAILURE, "Unable to find cloud services base URL")
-            );
+        if (WWW_PATH != null) {
+            try {
+                // Delete the loading.html file if it exists.
+                Files.deleteIfExists(Path.of(WWW_PATH + "/loading.html"));
+            } catch (IOException e) {
+                log.error("Error deleting loading.html file: {}", e.getMessage());
+            }
         }
 
-        return configService
-                .getInstanceId()
-                .flatMap(instanceId -> WebClientUtils
-                        .create(baseUrl + "/api/v1/installations")
-                        .post()
-                        .body(BodyInserters.fromValue(Map.of("key", instanceId)))
-                        .exchange())
-                .flatMap(clientResponse -> clientResponse.toEntity(new ParameterizedTypeReference<ResponseDTO<String>>() {
-                }))
-                .flatMap(responseEntity -> {
-                    if (responseEntity.getStatusCode().is2xxSuccessful()) {
-                        return Mono.justOrEmpty(Objects.requireNonNull(responseEntity.getBody()).getData());
-                    }
-                    return Mono.error(new AppsmithException(
-                            AppsmithError.INSTANCE_REGISTRATION_FAILURE,
-                            Objects.requireNonNull(responseEntity.getBody()).getResponseMeta().getError().getMessage()));
+        Mono<Void> registrationAndRtsCheckMono = configService
+                .getByName(Appsmith.APPSMITH_REGISTERED)
+                .filter(config -> TRUE.equals(config.getConfig().get("value")))
+                .switchIfEmpty(Mono.defer(() -> instanceConfigHelper.registerInstance()))
+                .onErrorResume(errorSignal -> {
+                    log.debug("Instance registration failed with error: \n{}", errorSignal.getMessage());
+                    return Mono.empty();
                 })
-                .flatMap(instanceId -> {
-                    log.debug("Registration successful, updating state ...");
-                    return configService.save(Appsmith.APPSMITH_REGISTERED, Map.of("value", true));
-                });
-    }
+                .then(instanceConfigHelper.performRtsHealthCheck());
 
-    private Mono<Void> performRtsHealthCheck() {
-        log.debug("Performing RTS health check of this instance...");
+        Mono<?> startupProcess = instanceConfigHelper
+                .checkMongoDBVersion()
+                .flatMap(ignored -> instanceConfigHelper.checkInstanceSchemaVersion())
+                .flatMap(signal -> registrationAndRtsCheckMono)
+                // Prefill the server cache with anonymous user permission group ids.
+                .then(cacheableRepositoryHelper.preFillAnonymousUserPermissionGroupIdsCache())
+                // Add cold publisher as we have dependency on the instance registration
+                // TODO Update implementation to fetch license status for all the tenants once multi-tenancy is
+                //  introduced
+                .then(Mono.defer(instanceConfigHelper::isLicenseValid)
+                        // Ensure that the tenant feature flags are refreshed with the latest values after completing
+                        // the
+                        // license verification process.
+                        .flatMap(isValid -> {
+                            log.debug(
+                                    "License verification completed with status: {}",
+                                    TRUE.equals(isValid) ? "valid" : "invalid");
+                            return instanceConfigHelper.updateCacheForTenantFeatureFlags();
+                        }));
 
-        return WebClientUtils
-                .create(commonConfig.getRtsBaseDomain() + "/rts-api/v1/health-check")
-                .get()
-                .retrieve()
-                .toBodilessEntity()
-                .doOnNext(nextSignal -> {
-                    log.debug("RTS health check succeeded");
-                    this.isRtsAccessible = true;
-                })
-                .doOnError(errorSignal -> log.debug("RTS health check failed with error: \n{}", errorSignal.getMessage()))
-                .then();
-    }
-
-    private void printReady() {
-        System.out.println(
-                "\n" +
-                        " █████╗ ██████╗ ██████╗ ███████╗███╗   ███╗██╗████████╗██╗  ██╗    ██╗███████╗    ██████╗ ██╗   ██╗███╗   ██╗███╗   ██╗██╗███╗   ██╗ ██████╗ ██╗\n" +
-                        "██╔══██╗██╔══██╗██╔══██╗██╔════╝████╗ ████║██║╚══██╔══╝██║  ██║    ██║██╔════╝    ██╔══██╗██║   ██║████╗  ██║████╗  ██║██║████╗  ██║██╔════╝ ██║\n" +
-                        "███████║██████╔╝██████╔╝███████╗██╔████╔██║██║   ██║   ███████║    ██║███████╗    ██████╔╝██║   ██║██╔██╗ ██║██╔██╗ ██║██║██╔██╗ ██║██║  ███╗██║\n" +
-                        "██╔══██║██╔═══╝ ██╔═══╝ ╚════██║██║╚██╔╝██║██║   ██║   ██╔══██║    ██║╚════██║    ██╔══██╗██║   ██║██║╚██╗██║██║╚██╗██║██║██║╚██╗██║██║   ██║╚═╝\n" +
-                        "██║  ██║██║     ██║     ███████║██║ ╚═╝ ██║██║   ██║   ██║  ██║    ██║███████║    ██║  ██║╚██████╔╝██║ ╚████║██║ ╚████║██║██║ ╚████║╚██████╔╝██╗\n" +
-                        "╚═╝  ╚═╝╚═╝     ╚═╝     ╚══════╝╚═╝     ╚═╝╚═╝   ╚═╝   ╚═╝  ╚═╝    ╚═╝╚══════╝    ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝\n" +
-                        "\n" +
-                        "Please open http://localhost:<port> in your browser to experience Appsmith!\n"
-        );
+        try {
+            startupProcess.block();
+        } catch (Exception e) {
+            log.debug("Application start up encountered an error: {}", e.getMessage());
+            Sentry.captureException(e);
+        }
     }
 
     public boolean getIsRtsAccessible() {
-        return this.isRtsAccessible;
+        return instanceConfigHelper.getIsRtsAccessible();
     }
-
 }

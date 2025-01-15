@@ -1,7 +1,9 @@
-import { OccupiedSpace } from "constants/CanvasEditorConstants";
+import type { OccupiedSpace } from "constants/CanvasEditorConstants";
 import { cloneDeep, isUndefined } from "lodash";
-import { Rect } from "utils/boxHelpers";
-import {
+import type { Rect } from "utils/boxHelpers";
+import { areIntersecting } from "utils/boxHelpers";
+import type {
+  BlockSpace,
   CollidingSpace,
   CollidingSpaceMap,
   CollisionAccessors,
@@ -9,17 +11,21 @@ import {
   CollisionTree,
   CollisionTreeCache,
   GridProps,
-  MathComparators,
   MovementLimitMap,
   OrientationAccessors,
   PrevReflowState,
-  ReflowDirection,
   ReflowedSpace,
   ReflowedSpaceMap,
   SecondOrderCollisionMap,
-  SpaceAttributes,
   SpaceMap,
   SpaceMovementMap,
+} from "./reflowTypes";
+import {
+  HORIZONTAL_RESIZE_MIN_LIMIT,
+  MathComparators,
+  ReflowDirection,
+  SpaceAttributes,
+  VERTICAL_RESIZE_MIN_LIMIT,
 } from "./reflowTypes";
 
 /**
@@ -113,6 +119,7 @@ export function sortCollidingSpacesByDistance(
   isAscending = true,
 ) {
   const distanceComparator = getDistanceComparator(isAscending);
+
   collidingSpaces.sort(distanceComparator);
 }
 
@@ -123,7 +130,7 @@ export function sortCollidingSpacesByDistance(
  * @returns comparator function
  */
 function getDistanceComparator(isAscending = true) {
-  return function(spaceA: CollidingSpace, spaceB: CollidingSpace) {
+  return function (spaceA: CollidingSpace, spaceB: CollidingSpace) {
     const accessorA = getAccessor(spaceA.direction);
     const accessorB = getAccessor(spaceB.direction);
 
@@ -133,6 +140,7 @@ function getDistanceComparator(isAscending = true) {
     const distanceB = Math.abs(
       spaceB.collidingValue - spaceB[accessorB.oppositeDirection],
     );
+
     return isAscending ? distanceB - distanceA : distanceA - distanceB;
   };
 }
@@ -161,13 +169,10 @@ export function getShouldReflow(
 
     let canHorizontalMove = true,
       canVerticalMove = true;
+
     for (const movementLimit of spaceMovements) {
-      const {
-        coordinateKey,
-        directionalIndicator,
-        isHorizontal,
-        maxMovement,
-      } = movementLimit;
+      const { coordinateKey, directionalIndicator, isHorizontal, maxMovement } =
+        movementLimit;
 
       const canMove = compareNumbers(
         delta[coordinateKey],
@@ -184,6 +189,7 @@ export function getShouldReflow(
 
     let prevCanHorizontalMove = true,
       prevCanVerticalMove = true;
+
     if (existingMovementLimits[movementKey]) {
       ({
         canHorizontalMove: prevCanHorizontalMove,
@@ -235,6 +241,11 @@ export function getDelta(
   const tempId = Object.keys(OGSpacePositionsMap)[0];
   const OGSpacePosition = OGSpacePositionsMap[tempId];
   const newSpacePosition = newSpacePositionsMap[tempId];
+
+  if (!OGSpacePosition || !newSpacePosition) {
+    return { X: 0, Y: 0 };
+  }
+
   let X = OGSpacePosition.left - newSpacePosition.left,
     Y = OGSpacePosition.top - newSpacePosition.top;
 
@@ -246,14 +257,15 @@ export function getDelta(
     const { direction: yDirection } = getAccessor(
       verticalDirection as ReflowDirection,
     );
+
     X = OGSpacePosition[xDirection] - newSpacePosition[xDirection];
     Y = OGSpacePosition[yDirection] - newSpacePosition[yDirection];
+
     return { X, Y };
   }
 
-  const { direction: directionalAccessor, isHorizontal } = getAccessor(
-    direction,
-  );
+  const { direction: directionalAccessor, isHorizontal } =
+    getAccessor(direction);
   const diff =
     OGSpacePosition[directionalAccessor] -
     newSpacePosition[directionalAccessor];
@@ -276,28 +288,60 @@ export function getDelta(
  * @param prevSpacesMap
  * @param forceDirection
  * @param primaryCollisionMap
+ * @param shouldReflowDropTarget boolean which indicates if we should reflow drop targets
+ * @param onTimeout indicates if the reflow is called on timeout
+ * @param mousePosition mouse Position on canvas grid
  * @returns collision spaces Map
  */
+
 export function getCollidingSpaceMap(
-  newSpacePositions: OccupiedSpace[],
-  occupiedSpaces: OccupiedSpace[],
+  newSpacePositions: BlockSpace[],
+  occupiedSpaces: BlockSpace[],
   direction: ReflowDirection,
   prevCollidingSpaceMap: CollidingSpaceMap,
   isHorizontalMove?: boolean,
   prevSpacesMap?: SpaceMap,
   forceDirection = false,
   primaryCollisionMap?: CollisionMap,
+  shouldReflowDropTarget = true,
+  onTimeOut = false,
+  mousePosition?: OccupiedSpace | undefined,
 ) {
   let isColliding = false;
   const collidingSpaceMap: CollisionMap = {};
   let order = 1;
   const orientationalAccessor = getOrientationAccessor(isHorizontalMove);
-  const oppositeOrientationalAccessor = getOrientationAccessor(
-    !isHorizontalMove,
-  );
+  const oppositeOrientationalAccessor =
+    getOrientationAccessor(!isHorizontalMove);
 
-  for (const newSpacePosition of newSpacePositions) {
-    for (const occupiedSpace of occupiedSpaces) {
+  let reflowableOccSpaces = [...occupiedSpaces],
+    currSpacePositions = [...newSpacePositions];
+
+  let shouldRegisterContainerTimeout = false;
+
+  //if droptargets are not to be reflowed, resize space positions
+  // and omit drop targets from the spaces
+  if (!shouldReflowDropTarget) {
+    // reset values based on function's result
+    ({
+      currSpacePositions,
+      reflowableOccSpaces,
+      shouldRegisterContainerTimeout,
+    } = resizeOnContainerCollision(
+      newSpacePositions,
+      occupiedSpaces,
+      mousePosition,
+      direction,
+      orientationalAccessor,
+      prevCollidingSpaceMap,
+      forceDirection,
+      isHorizontalMove,
+      prevSpacesMap,
+    ));
+  }
+
+  for (const newSpacePosition of currSpacePositions) {
+    for (const occupiedSpace of reflowableOccSpaces) {
       if (areOverlapping(occupiedSpace, newSpacePosition)) {
         isColliding = true;
         const currentSpaceId = occupiedSpace.id;
@@ -342,6 +386,14 @@ export function getCollidingSpaceMap(
             ].direction;
         }
 
+        if (occupiedSpace.isDropTarget && onTimeOut && !forceDirection) {
+          movementDirection = getCollisionDirectionOfDropTarget(
+            occupiedSpace,
+            movementDirection,
+            mousePosition,
+          );
+        }
+
         const {
           direction: directionAccessor,
           directionIndicator,
@@ -353,6 +405,7 @@ export function getCollidingSpaceMap(
         // If this particular space is already colliding with another dragging space,
         // then the highest in the particular direction will override the lowest value
         const currentCollidingSpace = collidingSpaceMap[currentSpaceId];
+
         if (
           !currentCollidingSpace ||
           (currentCollidingSpace &&
@@ -379,6 +432,8 @@ export function getCollidingSpaceMap(
   return {
     isColliding,
     collidingSpaceMap,
+    currSpacePositions,
+    shouldRegisterContainerTimeout,
   };
 }
 
@@ -403,13 +458,13 @@ export function getCollidingSpaceMap(
  */
 export function getCollidingSpacesInDirection(
   newSpacePosition: CollidingSpace,
-  OGPosition: OccupiedSpace,
+  OGPosition: BlockSpace,
   globalDirection: ReflowDirection,
   direction: ReflowDirection,
   gridProps: GridProps,
   prevReflowState: PrevReflowState,
   globalCollisionMap: CollisionMap,
-  occupiedSpaces?: OccupiedSpace[],
+  occupiedSpaces?: BlockSpace[],
   isDirectCollidingSpace = false,
 ) {
   const collidingSpaces: CollidingSpace[] = [];
@@ -429,25 +484,22 @@ export function getCollidingSpacesInDirection(
   const { prevMovementMap, prevSecondOrderCollisionMap } = prevReflowState;
 
   let order = 1;
+
   for (const occupiedSpace of currentOccupiedSpaces) {
     // determines if the space acn be added to the list of colliding spaces, if so in what direction
-    const {
-      changedDirection,
-      collidingValue,
-      isHorizontal,
-      shouldAddToArray,
-    } = ShouldAddToCollisionSpacesArray(
-      newSpacePosition,
-      OGPosition,
-      occupiedSpace,
-      direction,
-      accessor,
-      isDirectCollidingSpace,
-      gridProps,
-      globalDirection,
-      prevMovementMap,
-      prevSecondOrderCollisionMap,
-    );
+    const { changedDirection, collidingValue, isHorizontal, shouldAddToArray } =
+      ShouldAddToCollisionSpacesArray(
+        newSpacePosition,
+        OGPosition,
+        occupiedSpace,
+        direction,
+        accessor,
+        isDirectCollidingSpace,
+        gridProps,
+        globalDirection,
+        prevMovementMap,
+        prevSecondOrderCollisionMap,
+      );
 
     let currentDirection = direction,
       currentCollidingValue = newSpacePosition[accessor.direction],
@@ -513,7 +565,7 @@ export function getCollidingSpacesInDirection(
  */
 export function ShouldAddToCollisionSpacesArray(
   newSpacePosition: CollidingSpace,
-  OGPosition: OccupiedSpace,
+  OGPosition: BlockSpace,
   collidingSpace: OccupiedSpace,
   direction: ReflowDirection,
   accessor: CollisionAccessors,
@@ -538,6 +590,8 @@ export function ShouldAddToCollisionSpacesArray(
 
   const prevCollisionMap: {
     children: {
+      // TODO: Fix this the next time the file is edited
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       [key: string]: any;
     };
   } = (prevSecondOrderCollisionMap &&
@@ -571,6 +625,7 @@ export function ShouldAddToCollisionSpacesArray(
     const prevDirection =
       prevMovementMap[collidingSpace.id][movementDirectionAccessor];
     const shouldAddToArray = prevDirection === direction;
+
     return { shouldAddToArray };
   }
 
@@ -636,9 +691,11 @@ export function ShouldAddToCollisionSpacesArray(
     correctedAccessor.isHorizontal !== isHorizontal
   ) {
     let collidingValue = newSpacePosition.collidingValue;
+
     if (isHorizontal !== correctedAccessor.isHorizontal) {
       collidingValue = currentStaticSpace[correctedAccessor.direction];
     }
+
     return {
       shouldAddToArray: true,
       changedDirection: correctedDirection,
@@ -646,6 +703,7 @@ export function ShouldAddToCollisionSpacesArray(
       isHorizontal: correctedAccessor.isHorizontal,
     };
   }
+
   return { shouldAddToArray };
 }
 
@@ -659,11 +717,11 @@ export function ShouldAddToCollisionSpacesArray(
  * @returns filtered array of occupied space
  */
 export function filterSpaceByDirection(
-  newSpacePosition: OccupiedSpace,
-  occupiedSpaces: OccupiedSpace[] | undefined,
+  newSpacePosition: BlockSpace,
+  occupiedSpaces: BlockSpace[] | undefined,
   direction: ReflowDirection,
-): OccupiedSpace[] {
-  let filteredSpaces: OccupiedSpace[] = [];
+): BlockSpace[] {
+  let filteredSpaces: BlockSpace[] = [];
 
   const {
     direction: directionAccessor,
@@ -703,11 +761,13 @@ export function filterSpaceById(
   occupiedSpaces: OccupiedSpace[] | undefined,
 ): OccupiedSpace[] {
   let filteredSpaces: OccupiedSpace[] = [];
+
   if (occupiedSpaces) {
     filteredSpaces = occupiedSpaces.filter((occupiedSpace) => {
       return occupiedSpace.id !== id && occupiedSpace.parentId !== id;
     });
   }
+
   return filteredSpaces;
 }
 
@@ -719,10 +779,13 @@ export function filterSpaceById(
  * @mutates occupiedSpaceMap
  */
 export function filterCommonSpaces(
+  // TODO: Fix this the next time the file is edited
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   newSpacePositionsMap: { [key: string]: any },
   occupiedSpaceMap: SpaceMap,
 ) {
   const keysToFilter = Object.keys(newSpacePositionsMap);
+
   for (const key of keysToFilter) {
     if (occupiedSpaceMap[key]) {
       delete occupiedSpaceMap[key];
@@ -776,6 +839,7 @@ function getCorrectedDirection(
 
   let primaryDirection: ReflowDirection = direction,
     secondaryDirection: ReflowDirection | undefined = undefined;
+
   // this is for composite directions for resizing while dragging the corner handles
   if (direction.indexOf("|") >= 0) {
     const directions = direction.split("|");
@@ -891,6 +955,7 @@ export function compareNumbers(
     if (isEqual) {
       return numberA >= numberB;
     }
+
     return numberA > numberB;
   }
 
@@ -910,6 +975,7 @@ export function getOppositeDirection(
   direction: ReflowDirection,
 ): ReflowDirection {
   const directionalAccessors = getAccessor(direction);
+
   return directionalAccessors.oppositeDirection.toUpperCase() as ReflowDirection;
 }
 
@@ -931,6 +997,7 @@ export function getAccessor(direction: ReflowDirection): CollisionAccessors {
         parallelMax: SpaceAttributes.right,
         parallelMin: SpaceAttributes.left,
         mathComparator: MathComparators.max,
+        oppositeMathComparator: MathComparators.min,
         directionIndicator: -1,
         isHorizontal: true,
         plane: "horizontal",
@@ -944,6 +1011,7 @@ export function getAccessor(direction: ReflowDirection): CollisionAccessors {
         parallelMax: SpaceAttributes.right,
         parallelMin: SpaceAttributes.left,
         mathComparator: MathComparators.min,
+        oppositeMathComparator: MathComparators.max,
         directionIndicator: 1,
         isHorizontal: true,
         plane: "horizontal",
@@ -957,6 +1025,7 @@ export function getAccessor(direction: ReflowDirection): CollisionAccessors {
         parallelMax: SpaceAttributes.bottom,
         parallelMin: SpaceAttributes.top,
         mathComparator: MathComparators.max,
+        oppositeMathComparator: MathComparators.min,
         directionIndicator: -1,
         isHorizontal: false,
         plane: "vertical",
@@ -970,11 +1039,13 @@ export function getAccessor(direction: ReflowDirection): CollisionAccessors {
         parallelMax: SpaceAttributes.bottom,
         parallelMin: SpaceAttributes.top,
         mathComparator: MathComparators.min,
+        oppositeMathComparator: MathComparators.max,
         directionIndicator: 1,
         isHorizontal: false,
         plane: "vertical",
       };
   }
+
   return {
     direction: SpaceAttributes.bottom,
     oppositeDirection: SpaceAttributes.top,
@@ -983,6 +1054,7 @@ export function getAccessor(direction: ReflowDirection): CollisionAccessors {
     parallelMax: SpaceAttributes.bottom,
     parallelMin: SpaceAttributes.top,
     mathComparator: MathComparators.min,
+    oppositeMathComparator: MathComparators.max,
     directionIndicator: 1,
     isHorizontal: false,
     plane: "vertical",
@@ -1146,6 +1218,7 @@ export function getReflowedDimension(
   if (!shouldResize) {
     return originalDimension * snapGridSpace;
   }
+
   const resizeThreshold = maxDistance + currentDistanceBeforeCollision;
   const resizeLimit =
     resizeThreshold +
@@ -1184,6 +1257,7 @@ export function getLimitedMovementMap(
   movementLimit: { canVerticalMove: boolean; canHorizontalMove: boolean },
 ): ReflowedSpaceMap {
   if (!movementMap) return {};
+
   const { canHorizontalMove, canVerticalMove } = movementLimit;
 
   if (!canVerticalMove && !canHorizontalMove) {
@@ -1237,28 +1311,46 @@ function replaceMovementMapByDirection(
  *
  * @param collidingSpaceMap
  * @param exitContainerId
+ * @param mousePosition mouse Position on canvas grid
+ * @param spacePositionMap
  * @param direction
  * changes reference of collidingSpaceMap
  */
 export function changeExitContainerDirection(
   collidingSpaceMap: CollisionMap,
   exitContainerId: string | undefined,
-  direction: ReflowDirection,
+  mousePosition: OccupiedSpace | undefined,
+  spacePositionMap: SpaceMap,
 ) {
-  if (!exitContainerId || !collidingSpaceMap[exitContainerId]) {
+  if (
+    !exitContainerId ||
+    !collidingSpaceMap[exitContainerId] ||
+    !mousePosition
+  ) {
     return;
   }
 
-  const oppDirection = getOppositeDirection(direction);
-  const { directionIndicator, oppositeDirection } = getAccessor(oppDirection);
+  const exitEdgeDirection = getContainerExitEdge(
+    collidingSpaceMap[exitContainerId],
+    mousePosition,
+  );
+
+  if (!exitEdgeDirection) return;
+
+  const {
+    direction: directionAccessor,
+    directionIndicator,
+    oppositeDirection: exitDirectionAccessor,
+  } = getAccessor(exitEdgeDirection);
 
   const collidingSpaces: CollidingSpace[] = Object.values(collidingSpaceMap);
-  const oppositeFrom = collidingSpaceMap[exitContainerId][oppositeDirection];
+  const oppositeFrom =
+    collidingSpaceMap[exitContainerId][exitDirectionAccessor];
 
   const oppositeSpaceIds = collidingSpaces
     .filter((collidingSpace: CollidingSpace) => {
       return compareNumbers(
-        collidingSpace[oppositeDirection],
+        collidingSpace[exitDirectionAccessor],
         oppositeFrom,
         directionIndicator > 0,
         true,
@@ -1267,8 +1359,19 @@ export function changeExitContainerDirection(
     .map((collidingSpace: CollidingSpace) => collidingSpace.id);
 
   for (const spaceId of oppositeSpaceIds) {
-    collidingSpaceMap[spaceId].direction = oppDirection;
+    collidingSpaceMap[spaceId].direction = exitEdgeDirection;
+    collidingSpaceMap[spaceId].collidingValue =
+      spacePositionMap[collidingSpaceMap[spaceId].collidingId][
+        directionAccessor
+      ];
   }
+
+  collidingSpaceMap[exitContainerId].direction =
+    getOppositeDirection(exitEdgeDirection);
+  collidingSpaceMap[exitContainerId].collidingValue =
+    spacePositionMap[collidingSpaceMap[exitContainerId].collidingId][
+      exitDirectionAccessor
+    ];
 }
 
 /**
@@ -1277,14 +1380,15 @@ export function changeExitContainerDirection(
  * @param spacesArray
  * @returns space map
  */
-export function getSpacesMapFromArray(
-  spacesArray: OccupiedSpace[] | undefined,
-) {
+export function getSpacesMapFromArray(spacesArray: BlockSpace[] | undefined) {
   if (!spacesArray) return {};
+
   const spacesMap: SpaceMap = {};
+
   for (const space of spacesArray) {
     spacesMap[space.id] = space;
   }
+
   return spacesMap;
 }
 
@@ -1302,6 +1406,7 @@ export function buildArrayToCollisionMap(
   const collidingSpaceMap: CollisionMap = {};
 
   let order = 1;
+
   for (const collidingSpace of collidingSpaces) {
     const { directionIndicator } = getAccessor(collidingSpace.direction);
     const prevCollidingSpace = collidingSpaceMap[collidingSpace.id];
@@ -1320,6 +1425,7 @@ export function buildArrayToCollisionMap(
       order++;
     }
   }
+
   return collidingSpaceMap;
 }
 
@@ -1360,6 +1466,7 @@ export function getModifiedOccupiedSpacesMap(
     const dimension =
       prevMovementMap[key] && prevMovementMap[key][dimensionAccessor];
     const currentSpace = occupiedSpacesMap[key];
+
     directionalOccupiedSpacesMap[key] = {
       ...currentSpace,
       [directionMin]:
@@ -1370,6 +1477,7 @@ export function getModifiedOccupiedSpacesMap(
         : currentSpace[directionMax] + Math.round(movement / gridGap),
     };
   }
+
   return directionalOccupiedSpacesMap;
 }
 
@@ -1445,10 +1553,10 @@ export function getModifiedCollidingSpace(
  */
 export function checkReCollisionWithOtherNewSpacePositions(
   collidingSpace: CollidingSpace,
-  OGCollidingSpacePosition: OccupiedSpace,
+  OGCollidingSpacePosition: BlockSpace,
   globalDirection: ReflowDirection,
   direction: ReflowDirection,
-  newSpacePositions: OccupiedSpace[],
+  newSpacePositions: BlockSpace[],
   globalCollidingSpaces: CollidingSpace[],
   insertionIndex: number,
   globalProcessedNodes: CollisionTreeCache,
@@ -1460,9 +1568,8 @@ export function checkReCollisionWithOtherNewSpacePositions(
   const { isHorizontal: globalIsHorizontal } = getAccessor(globalDirection);
   const { prevCollidingSpaceMap, prevSpacesMap } = prevReflowState;
   const orientationalAccessor = getOrientationAccessor(globalIsHorizontal);
-  const oppositeOrientationalAccessor = getOrientationAccessor(
-    !globalIsHorizontal,
-  );
+  const oppositeOrientationalAccessor =
+    getOrientationAccessor(!globalIsHorizontal);
   let stopCollisionCheck = false;
 
   for (const newSpacePosition of newSpacePositions) {
@@ -1532,6 +1639,7 @@ export function checkReCollisionWithOtherNewSpacePositions(
       }
     }
   }
+
   return stopCollisionCheck;
 }
 
@@ -1556,6 +1664,8 @@ function getCollisionStatusBasedOnPrevValue(
   gridProps: GridProps,
   prevCollisionMap: {
     children: {
+      // TODO: Fix this the next time the file is edited
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       [key: string]: any;
     };
   },
@@ -1615,6 +1725,7 @@ function getCollisionStatusBasedOnPrevValue(
           staticSpace[localAccessor.parallelMin];
 
     const orientationalDimension = localAccessor.directionIndicator * dimension;
+
     return {
       shouldAddToArray: true,
       changedDirection: prevCollisionSpace.direction,
@@ -1648,12 +1759,8 @@ export function getOrientationAccessors(
  * @returns
  */
 export function getMaxSpaceAttributes(accessor: CollisionAccessors) {
-  const {
-    parallelMax,
-    parallelMin,
-    perpendicularMax,
-    perpendicularMin,
-  } = accessor;
+  const { parallelMax, parallelMin, perpendicularMax, perpendicularMin } =
+    accessor;
 
   return {
     primary: { max: perpendicularMax, min: perpendicularMin },
@@ -1686,6 +1793,7 @@ export function getSortedOccupiedSpaces(
   sortedOccupiedSpaces.sort((a, b) => {
     return a[accessors.direction] - b[accessors.direction];
   });
+
   return sortedOccupiedSpaces;
 }
 
@@ -1701,6 +1809,7 @@ export function getSortedNewPositions(
   accessors: CollisionAccessors,
 ) {
   const newSpacePositions = Object.values(newSpacePositionsMap);
+
   newSpacePositions
     .sort((a, b) => {
       return a[accessors.direction] - b[accessors.direction];
@@ -1708,6 +1817,7 @@ export function getSortedNewPositions(
     .map((a) => {
       return { ...a, order: true };
     });
+
   return newSpacePositions;
 }
 
@@ -1733,6 +1843,7 @@ export function getSortedCollidingSpaces(
   collidingSpaces.sort((a, b) => {
     const collisionKeyA = a.id,
       collisionKeyB = b.id;
+
     if (prevCollisionMap) {
       if (prevCollisionMap[collisionKeyA] && prevCollisionMap[collisionKeyB]) {
         return (
@@ -1763,6 +1874,7 @@ export function getCalculatedDirection(
   passedDirection: ReflowDirection,
 ) {
   if (passedDirection.indexOf("|") >= 0) return [passedDirection];
+
   for (const key in newSpacePositionsMap) {
     if (newSpacePositionsMap[key] && prevSpacesMap[key]) {
       const { left: newLeft, top: newTop } = newSpacePositionsMap[key];
@@ -1778,10 +1890,12 @@ export function getCalculatedDirection(
             : ReflowDirection.LEFT,
         ];
       }
+
       if (newTop !== prevTop)
         return compareNumbers(newTop, prevTop, true)
           ? [ReflowDirection.BOTTOM]
           : [ReflowDirection.TOP];
+
       if (newLeft !== prevLeft)
         return compareNumbers(newLeft, prevLeft, true)
           ? [ReflowDirection.RIGHT]
@@ -1790,6 +1904,7 @@ export function getCalculatedDirection(
       return [passedDirection];
     }
   }
+
   return [passedDirection];
 }
 
@@ -1800,9 +1915,11 @@ export function getCalculatedDirection(
  */
 export function getBottomMostRow(newPositions: OccupiedSpace[]): number {
   let maxBottomRow = 0;
+
   for (const newPosition of newPositions) {
     maxBottomRow = Math.max(maxBottomRow, newPosition.bottom);
   }
+
   return maxBottomRow;
 }
 
@@ -1851,6 +1968,7 @@ export function checkProcessNodeForTree(
     occupiedSpace,
     value,
   } = globalProcessedNodes[collidingSpace.id][direction];
+
   if (collidingSpace.collidingValue === value)
     return {
       shouldProcessNode: false,
@@ -1897,4 +2015,298 @@ export function getRelativeCollidingValue(
     calculatedCollidingValue,
     collidingValue,
   );
+}
+
+/**
+ * Get the edge from which the widget just exited
+ * @param exitContainer Id of the container that was just exited
+ * @param mousePosition position of mouse on Canvas Grid
+ * @returns
+ */
+export function getContainerExitEdge(
+  exitContainer: OccupiedSpace,
+  mousePosition: OccupiedSpace,
+) {
+  if (
+    mousePosition.top > exitContainer.top &&
+    mousePosition.top < exitContainer.bottom
+  ) {
+    if (mousePosition.left >= exitContainer.right) return ReflowDirection.RIGHT;
+
+    if (mousePosition.left <= exitContainer.left) return ReflowDirection.LEFT;
+  }
+
+  if (
+    mousePosition.left > exitContainer.left &&
+    mousePosition.left < exitContainer.right
+  ) {
+    if (mousePosition.top >= exitContainer.bottom)
+      return ReflowDirection.BOTTOM;
+
+    if (mousePosition.top <= exitContainer.top) return ReflowDirection.TOP;
+  }
+}
+
+/**
+ * If we are not reflowing the drop targets,
+ * then we will have to figure out the direction in which it is colliding with dragging Spaces
+ * @param containerSpace Space positions of Container/Droptargets
+ * @param currentDirection current Direction
+ * @param mousePosition Position of mouse on Canvas Grid
+ * @returns
+ */
+export function getCollisionDirectionOfDropTarget(
+  containerSpace: BlockSpace,
+  currentDirection: ReflowDirection,
+  mousePosition?: OccupiedSpace,
+): ReflowDirection {
+  const possiblePushDirections = getPossiblePushDirections(
+    containerSpace,
+    mousePosition,
+  );
+
+  if (
+    possiblePushDirections.length < 1 ||
+    possiblePushDirections.includes(currentDirection)
+  ) {
+    return currentDirection;
+  }
+
+  return possiblePushDirections[0];
+}
+
+/**
+ * Get the possible directions the Containers/drop targets can be pushed based on mousePosition
+ * @param containerSpace Space positions of Container/Droptargets
+ * @param mousePosition Position of mouse on Canvas Grid
+ * @returns Array of Possible directions, at the max two directions based on mouse positions,
+ *          sorted by distance to container of mouse position
+ */
+function getPossiblePushDirections(
+  containerSpace: BlockSpace,
+  mousePosition?: OccupiedSpace,
+): ReflowDirection[] {
+  if (!mousePosition) return [];
+
+  const directionsWithDistance: {
+    distance: number;
+    direction: ReflowDirection;
+  }[] = [];
+
+  if (containerSpace.left >= mousePosition.left) {
+    directionsWithDistance.push({
+      distance: containerSpace.left - mousePosition.left,
+      direction: ReflowDirection.RIGHT,
+    });
+  } else if (mousePosition.left >= containerSpace.right) {
+    directionsWithDistance.push({
+      distance: mousePosition.left - containerSpace.right,
+      direction: ReflowDirection.LEFT,
+    });
+  }
+
+  if (containerSpace.top >= mousePosition.top) {
+    directionsWithDistance.push({
+      distance: containerSpace.top - mousePosition.top,
+      direction: ReflowDirection.BOTTOM,
+    });
+  } else if (mousePosition.top >= containerSpace.bottom) {
+    directionsWithDistance.push({
+      distance: mousePosition.top - containerSpace.bottom,
+      direction: ReflowDirection.TOP,
+    });
+  }
+
+  return directionsWithDistance
+    .sort((a, b) => {
+      return b.distance - a.distance;
+    })
+    .map((obj) => obj.direction);
+}
+
+/**
+ * Resize the dragging widget on collision with Container/Droptarget widget
+ * @param newSpacePositions positions of dragging spaces
+ * @param occupiedSpaces occupied spaces of other blocks on the canvas
+ * @param mousePosition position of mouse on canvas grid
+ * @param direction ReflowDirection
+ * @param orientationalAccessor "vertical" or "horizontal"
+ * @param prevCollidingSpaceMap previous colliding map
+ * @param forceDirection boolean to indicate if direction should be forced
+ * @param isHorizontalMove boolean
+ * @param prevSpacesMap previous position maps
+ * @returns
+ */
+export function resizeOnContainerCollision(
+  newSpacePositions: BlockSpace[],
+  occupiedSpaces: BlockSpace[],
+  mousePosition: OccupiedSpace | undefined,
+  direction: ReflowDirection,
+  orientationalAccessor: "horizontal" | "vertical",
+  prevCollidingSpaceMap: CollidingSpaceMap,
+  forceDirection: boolean,
+  isHorizontalMove?: boolean,
+  prevSpacesMap?: SpaceMap,
+): {
+  reflowableOccSpaces: BlockSpace[];
+  currSpacePositions: BlockSpace[];
+  shouldRegisterContainerTimeout: boolean;
+} {
+  const reflowableOccSpaces = [];
+
+  //boolean to indicate if this run should be registered for timeout
+  let shouldRegisterContainerTimeout = false;
+
+  // resize space positions only is single space is being dragged
+  if (newSpacePositions.length > 1) {
+    return {
+      reflowableOccSpaces: occupiedSpaces.filter(
+        (occSpace) => !occSpace.isDropTarget,
+      ),
+      currSpacePositions: newSpacePositions,
+      shouldRegisterContainerTimeout: occupiedSpaces.some(
+        (space) => space.isDropTarget,
+      ),
+    };
+  }
+
+  let currSpacePosition = { ...newSpacePositions[0] };
+
+  for (const occupiedSpace of occupiedSpaces) {
+    if (areOverlapping(occupiedSpace, currSpacePosition)) {
+      if (!occupiedSpace.isDropTarget) {
+        reflowableOccSpaces.push(occupiedSpace);
+        continue;
+      }
+
+      //get calculated direction
+      let movementDirection = getCorrectedDirection(
+        occupiedSpace,
+        prevSpacesMap && prevSpacesMap[currSpacePosition.id]
+          ? prevSpacesMap[currSpacePosition.id]
+          : undefined,
+        direction,
+        false,
+        prevCollidingSpaceMap && prevCollidingSpaceMap[orientationalAccessor],
+        isHorizontalMove,
+      );
+
+      //check if direction could be changed because of mouse Position
+      movementDirection = getCollisionDirectionOfDropTarget(
+        occupiedSpace,
+        movementDirection,
+        mousePosition,
+      );
+
+      //modify/resize dragging position if required
+      currSpacePosition = modifyResizePosition(
+        currSpacePosition,
+        occupiedSpace,
+        forceDirection ? direction : movementDirection,
+      );
+
+      // setting it to true as it should register a timeout function
+      shouldRegisterContainerTimeout = true;
+    }
+  }
+
+  return {
+    reflowableOccSpaces,
+    currSpacePositions: [currSpacePosition],
+    shouldRegisterContainerTimeout,
+  };
+}
+
+/**
+ * Modify the Space position when colliding with
+ * @param newSpacePositions positions of dragging spaces
+ * @param collidingContainer Space positions of Container/Droptargets
+ * @param direction ReflowDirection
+ * @returns
+ */
+export function modifyResizePosition(
+  newSpacePosition: BlockSpace,
+  collidingContainer: BlockSpace,
+  direction: ReflowDirection,
+): BlockSpace {
+  if (!direction || direction === ReflowDirection.UNSET) {
+    return newSpacePosition;
+  }
+
+  const spacePosition = { ...newSpacePosition };
+  const {
+    direction: directionAccessor,
+    directionIndicator,
+    isHorizontal,
+    mathComparator,
+    oppositeDirection,
+    oppositeMathComparator,
+  } = getAccessor(direction);
+
+  spacePosition[directionAccessor] = Math[mathComparator](
+    spacePosition[directionAccessor],
+    collidingContainer[oppositeDirection],
+  );
+
+  const minDimension = isHorizontal
+    ? HORIZONTAL_RESIZE_MIN_LIMIT
+    : newSpacePosition.fixedHeight === undefined
+      ? VERTICAL_RESIZE_MIN_LIMIT
+      : newSpacePosition.fixedHeight;
+
+  spacePosition[directionAccessor] = Math[oppositeMathComparator](
+    spacePosition[directionAccessor],
+    spacePosition[oppositeDirection] + directionIndicator * minDimension,
+  );
+
+  return spacePosition;
+}
+
+/**
+ * Checks if any of the widget has reached it's movements limit and returns true if it has
+ * @param movementLimitMap
+ * @returns boolean
+ */
+export function willItCauseUndroppableState(
+  movementLimitMap: MovementLimitMap | undefined,
+) {
+  if (!movementLimitMap) return true;
+
+  const movementLimits = Object.values(movementLimitMap);
+
+  return movementLimits.some(
+    (limit) => !(limit.canHorizontalMove && limit.canVerticalMove),
+  );
+}
+
+/**
+ * verify the widget being dragged is colliding with drop targets when they are not being reflowed
+ * @param movementLimitMap
+ * @param spacePositionMap
+ * @param occupiedSpacesMap
+ * @returns
+ */
+export function verifyMovementLimits(
+  movementLimitMap: MovementLimitMap,
+  spacePositionMap: SpaceMap,
+  occupiedSpacesMap: SpaceMap,
+) {
+  for (const spaceId in spacePositionMap) {
+    for (const occupiedSpaceId in occupiedSpacesMap) {
+      if (
+        occupiedSpacesMap[occupiedSpaceId].isDropTarget &&
+        areIntersecting(
+          occupiedSpacesMap[occupiedSpaceId],
+          spacePositionMap[spaceId],
+        )
+      ) {
+        movementLimitMap[spaceId] = {
+          canHorizontalMove: false,
+          canVerticalMove: false,
+        };
+      }
+    }
+  }
+
+  return movementLimitMap;
 }

@@ -1,48 +1,39 @@
-import React, {
-  useRef,
-  MutableRefObject,
-  useCallback,
-  useEffect,
-  useState,
-} from "react";
+import React, { useRef, useCallback, useEffect } from "react";
 import styled from "styled-components";
-import Divider from "components/editorComponents/Divider";
-import Search from "./ExplorerSearch";
 import { NonIdealState, Classes } from "@blueprintjs/core";
-import JSDependencies from "./JSDependencies";
-import PerformanceTracker, {
-  PerformanceTransactionName,
-} from "utils/PerformanceTracker";
 import { useDispatch, useSelector } from "react-redux";
-import { ScrollIndicator } from "design-system";
 
-import { ReactComponent as NoEntityFoundSvg } from "assets/svg/no_entities_found.svg";
 import { Colors } from "constants/Colors";
 
 import { getIsFirstTimeUserOnboardingEnabled } from "selectors/onboardingSelectors";
 import { toggleInOnboardingWidgetSelection } from "actions/onboardingActions";
 
 import { forceOpenWidgetPanel } from "actions/widgetSidebarActions";
-import Datasources from "./Datasources";
 import Files from "./Files";
 import ExplorerWidgetGroup from "./Widgets/WidgetGroup";
-import { builderURL } from "RouteBuilder";
+import { builderURL } from "ee/RouteBuilder";
 import history from "utils/history";
-import { SEARCH_ENTITY } from "constants/Explorer";
-import { getCurrentPageId } from "selectors/editorSelectors";
-import { fetchWorkspace } from "@appsmith/actions/workspaceActions";
-import { getCurrentWorkspaceId } from "@appsmith/selectors/workspaceSelectors";
+import {
+  getCurrentBasePageId,
+  getCurrentPageId,
+  getPagePermissions,
+} from "selectors/editorSelectors";
+import { fetchWorkspace } from "ee/actions/workspaceActions";
+import { getCurrentWorkspaceId } from "ee/selectors/selectedWorkspaceSelectors";
+import { importSvg } from "@appsmith/ads-old";
+import AnalyticsUtil from "ee/utils/AnalyticsUtil";
+import { EntityExplorerWrapper } from "./Common/EntityExplorerWrapper";
+import { getCurrentApplicationId } from "selectors/editorSelectors";
+import { FilesContextProvider } from "./Files/FilesContextProvider";
+import { getHasCreateActionPermission } from "ee/utils/BusinessFeatures/permissionPageHelpers";
+import { useFeatureFlag } from "utils/hooks/useFeatureFlag";
+import { FEATURE_FLAG } from "ee/entities/FeatureFlag";
+import { ActionParentEntityType } from "ee/entities/Engine/actionHelpers";
+import { getShowWorkflowFeature } from "ee/selectors/workflowSelectors";
 
-const Wrapper = styled.div`
-  height: 100%;
-  overflow-y: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-  &::-webkit-scrollbar {
-    width: 0px;
-    -webkit-appearance: none;
-  }
-`;
+const NoEntityFoundSvg = importSvg(
+  async () => import("assets/svg/no_entities_found.svg"),
+);
 
 const NoResult = styled(NonIdealState)`
   &.${Classes.NON_IDEAL_STATE} {
@@ -70,33 +61,24 @@ const NoResult = styled(NonIdealState)`
   }
 `;
 
-const StyledDivider = styled(Divider)`
-  border-bottom-color: #f0f0f0;
-`;
-
 function EntityExplorer({ isActive }: { isActive: boolean }) {
   const dispatch = useDispatch();
-  const [searchKeyword, setSearchKeyword] = useState("");
-  const searchInputRef: MutableRefObject<HTMLInputElement | null> = useRef(
-    null,
-  );
-  PerformanceTracker.startTracking(PerformanceTransactionName.ENTITY_EXPLORER);
-  useEffect(() => {
-    PerformanceTracker.stopTracking();
-  });
   const explorerRef = useRef<HTMLDivElement | null>(null);
   const isFirstTimeUserOnboardingEnabled = useSelector(
     getIsFirstTimeUserOnboardingEnabled,
   );
   const noResults = false;
+  const basePageId = useSelector(getCurrentBasePageId);
   const pageId = useSelector(getCurrentPageId);
   const showWidgetsSidebar = useCallback(() => {
-    history.push(builderURL({ pageId }));
+    AnalyticsUtil.logEvent("EXPLORER_WIDGET_CLICK");
+    history.push(builderURL({ basePageId }));
     dispatch(forceOpenWidgetPanel(true));
+
     if (isFirstTimeUserOnboardingEnabled) {
       dispatch(toggleInOnboardingWidgetSelection(true));
     }
-  }, [isFirstTimeUserOnboardingEnabled, pageId]);
+  }, [isFirstTimeUserOnboardingEnabled, basePageId]);
 
   const currentWorkspaceId = useSelector(getCurrentWorkspaceId);
 
@@ -104,42 +86,35 @@ function EntityExplorer({ isActive }: { isActive: boolean }) {
     dispatch(fetchWorkspace(currentWorkspaceId));
   }, [currentWorkspaceId]);
 
-  /**
-   * filter entitites
-   */
-  const search = (e: any) => {
-    setSearchKeyword(e.target.value);
-  };
+  const applicationId = useSelector(getCurrentApplicationId);
 
-  const clearSearchInput = () => {
-    if (searchInputRef.current) {
-      searchInputRef.current.value = "";
-    }
+  const pagePermissions = useSelector(getPagePermissions);
 
-    setSearchKeyword("");
-  };
+  const isFeatureEnabled = useFeatureFlag(FEATURE_FLAG.license_gac_enabled);
+
+  const canCreateActions = getHasCreateActionPermission(
+    isFeatureEnabled,
+    pagePermissions,
+  );
+
+  const showWorkflows = useSelector(getShowWorkflowFeature);
 
   return (
-    <Wrapper
-      className={`t--entity-explorer-wrapper relative overflow-y-auto ${
-        isActive ? "" : "hidden"
-      }`}
-      ref={explorerRef}
-    >
-      {/* SEARCH */}
-      <Search
-        clear={clearSearchInput}
-        id={SEARCH_ENTITY}
-        isHidden
-        onChange={search}
-        ref={searchInputRef}
-      />
+    <EntityExplorerWrapper explorerRef={explorerRef} isActive={isActive}>
       <ExplorerWidgetGroup
         addWidgetsFn={showWidgetsSidebar}
-        searchKeyword={searchKeyword}
+        searchKeyword=""
         step={0}
       />
-      <Files />
+      <FilesContextProvider
+        canCreateActions={canCreateActions}
+        editorId={applicationId}
+        parentEntityId={pageId}
+        parentEntityType={ActionParentEntityType.PAGE}
+        showWorkflows={showWorkflows}
+      >
+        <Files />
+      </FilesContextProvider>
       {noResults && (
         <NoResult
           className={Classes.DARK}
@@ -148,11 +123,7 @@ function EntityExplorer({ isActive }: { isActive: boolean }) {
           title="No entities found"
         />
       )}
-      <StyledDivider />
-      <Datasources />
-      <JSDependencies />
-      <ScrollIndicator containerRef={explorerRef} />
-    </Wrapper>
+    </EntityExplorerWrapper>
   );
 }
 

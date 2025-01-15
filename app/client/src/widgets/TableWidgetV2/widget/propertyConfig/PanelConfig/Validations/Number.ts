@@ -1,6 +1,10 @@
 import { ValidationTypes } from "constants/WidgetValidation";
-import { ColumnTypes, TableWidgetProps } from "widgets/TableWidgetV2/constants";
-import { hideByColumnType } from "widgets/TableWidgetV2/widget/propertyUtils";
+import type { TableWidgetProps } from "widgets/TableWidgetV2/constants";
+import { ColumnTypes } from "widgets/TableWidgetV2/constants";
+import {
+  hideByColumnType,
+  getColumnPath,
+} from "widgets/TableWidgetV2/widget/propertyUtils";
 
 export default [
   {
@@ -16,12 +20,14 @@ export default [
       params: { default: -Infinity },
     },
     hidden: (props: TableWidgetProps, propertyPath: string) => {
-      const path = propertyPath
-        .split(".")
-        .slice(0, 2)
-        .join(".");
+      const path = getColumnPath(propertyPath);
 
-      return hideByColumnType(props, path, [ColumnTypes.NUMBER], true);
+      return hideByColumnType(
+        props,
+        path,
+        [ColumnTypes.NUMBER, ColumnTypes.CURRENCY],
+        true,
+      );
     },
     dependencies: ["primaryColumns"],
   },
@@ -38,12 +44,14 @@ export default [
       params: { default: Infinity },
     },
     hidden: (props: TableWidgetProps, propertyPath: string) => {
-      const path = propertyPath
-        .split(".")
-        .slice(0, 2)
-        .join(".");
+      const path = getColumnPath(propertyPath);
 
-      return hideByColumnType(props, path, [ColumnTypes.NUMBER], true);
+      return hideByColumnType(
+        props,
+        path,
+        [ColumnTypes.NUMBER, ColumnTypes.CURRENCY],
+        true,
+      );
     },
     dependencies: ["primaryColumns"],
   },

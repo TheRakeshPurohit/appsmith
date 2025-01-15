@@ -1,18 +1,18 @@
-import { AppState } from "@appsmith/reducers";
-import {
+import type { AppState } from "ee/reducers";
+import type { FeatureFlags } from "ee/entities/FeatureFlag";
+import type {
   CodeEditorHistory,
   CursorPosition,
   EvaluatedPopupState,
-  isSubEntities,
   PropertyPanelContext,
   PropertyPanelState,
-} from "reducers/uiReducers/editorContextReducer";
+} from "ee/reducers/uiReducers/editorContextReducer";
+import { isSubEntities } from "ee/reducers/uiReducers/editorContextReducer";
 import { createSelector } from "reselect";
-import { selectFeatureFlags } from "selectors/usersSelectors";
-import FeatureFlags from "entities/FeatureFlags";
+import { selectFeatureFlags } from "ee/selectors/featureFlagsSelectors";
 
-export const getFocusableCodeEditorField = (state: AppState) =>
-  state.ui.editorContext.focusableCodeEditor;
+export const getFocusableInputField = (state: AppState) =>
+  state.ui.editorContext.focusedInputField;
 
 export const getCodeEditorHistory = (state: AppState) =>
   state.ui.editorContext.codeEditorHistory;
@@ -22,9 +22,6 @@ export const getPropertyPanelState = (state: AppState) =>
 
 export const getAllPropertySectionState = (state: AppState) =>
   state.ui.editorContext.propertySectionState;
-
-export const getSelectedCanvasDebuggerTab = (state: AppState) =>
-  state.ui.editorContext.selectedDebuggerTab;
 
 export const getWidgetSelectedPropertyTabIndex = (state: AppState) =>
   state.ui.editorContext.selectedPropertyTabIndex;
@@ -63,25 +60,8 @@ export const getSelectedPropertyTabIndex = createSelector(
       propertyPanelContext.selectedPropertyTabIndex !== undefined
     )
       return propertyPanelContext.selectedPropertyTabIndex;
-    return selectedPropertyTabIndex;
-  },
-);
 
-export const getIsCodeEditorFocused = createSelector(
-  [
-    getFocusableCodeEditorField,
-    selectFeatureFlags,
-    (_state: AppState, key: string | undefined) => key,
-  ],
-  (
-    focusableField: string | undefined,
-    featureFlags: FeatureFlags,
-    key: string | undefined,
-  ): boolean => {
-    if (featureFlags.CONTEXT_SWITCHING) {
-      return !!(key && focusableField === key);
-    }
-    return false;
+    return selectedPropertyTabIndex;
   },
 );
 
@@ -92,6 +72,7 @@ export const getCodeEditorLastCursorPosition = createSelector(
     key: string | undefined,
   ): CursorPosition | undefined => {
     if (key === undefined) return;
+
     return codeEditorHistory[key]?.cursorPosition;
   },
 );
@@ -103,6 +84,21 @@ export const getEvaluatedPopupState = createSelector(
     key: string | undefined,
   ): EvaluatedPopupState | undefined => {
     return key ? codeEditorHistory?.[key]?.evalPopupState : undefined;
+  },
+);
+
+export const getIsInputFieldFocused = createSelector(
+  [
+    getFocusableInputField,
+    selectFeatureFlags,
+    (_state: AppState, key: string | undefined) => key,
+  ],
+  (
+    focusableField: string | undefined,
+    featureFlags: FeatureFlags,
+    key: string | undefined,
+  ): boolean => {
+    return !!(key && focusableField === key);
   },
 );
 
@@ -118,6 +114,7 @@ const getPanelContext = (
     key: options.key,
   };
 };
+
 export const getPropertySectionState = createSelector(
   [getAllPropertySectionState, getPanelContext],
   (
@@ -128,8 +125,10 @@ export const getPropertySectionState = createSelector(
     },
   ): boolean | undefined => {
     const { key, propertyPanelContext } = options;
+
     if (propertyPanelContext?.propertySectionState)
       return propertyPanelContext.propertySectionState[key];
+
     return propertySectionState[key];
   },
 );
@@ -147,6 +146,7 @@ export const getEntityCollapsibleState = createSelector(
   ): boolean | undefined => {
     if (isSubEntities(entityName))
       return subEntityCollapsibleStates[entityName];
+
     return entityCollapsibleStates[entityName];
   },
 );

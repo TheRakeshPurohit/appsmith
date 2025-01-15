@@ -1,9 +1,13 @@
-import React, { ReactNode, RefObject, useRef, useEffect } from "react";
+import type { ReactNode, RefObject } from "react";
+import React, { useRef, useEffect } from "react";
 import { Overlay, Classes } from "@blueprintjs/core";
 import styled from "styled-components";
 import { getCanvasClassName } from "utils/generators";
 import { Layers } from "constants/Layers";
-import { MODAL_PORTAL_CLASSNAME } from "constants/WidgetConstants";
+import {
+  MODAL_PORTAL_CLASSNAME,
+  MODAL_PORTAL_OVERLAY_CLASSNAME,
+} from "constants/WidgetConstants";
 
 const Container = styled.div<{
   width?: number;
@@ -54,8 +58,10 @@ const Content = styled.div<{
   height: ${(props) => (props.height ? `${props.height}px` : "auto")};
 `;
 
-export type ModalComponentProps = {
+export interface ModalComponentProps {
   isOpen: boolean;
+  // TODO: Fix this the next time the file is edited
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onClose: (e: any) => void;
   onModalClose?: () => void;
   children: ReactNode;
@@ -73,13 +79,13 @@ export type ModalComponentProps = {
   hasBackDrop?: boolean;
   zIndex?: number;
   portalClassName?: string;
-};
+}
 
 /* eslint-disable react/display-name */
 export function ModalComponent(props: ModalComponentProps) {
-  const modalContentRef: RefObject<HTMLDivElement> = useRef<HTMLDivElement>(
-    null,
-  );
+  const modalContentRef: RefObject<HTMLDivElement> =
+    useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     return () => {
       // handle modal close events when this component unmounts
@@ -93,6 +99,7 @@ export function ModalComponent(props: ModalComponentProps) {
       modalContentRef.current?.scrollTo({ top: 0, behavior: "smooth" });
     }
   }, [props.scrollContents]);
+
   return (
     <Overlay
       canEscapeKeyClose={false}
@@ -101,7 +108,7 @@ export function ModalComponent(props: ModalComponentProps) {
       hasBackdrop={false}
       isOpen={props.isOpen}
       onClose={props.onClose}
-      portalClassName={`${MODAL_PORTAL_CLASSNAME} ${props.portalClassName}`}
+      portalClassName={`${MODAL_PORTAL_CLASSNAME} ${props.portalClassName} ${MODAL_PORTAL_OVERLAY_CLASSNAME}`}
       usePortal
     >
       <Container

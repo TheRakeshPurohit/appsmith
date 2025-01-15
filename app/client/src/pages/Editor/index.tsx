@@ -1,65 +1,83 @@
 import React, { Component } from "react";
 import { Helmet } from "react-helmet";
 import { connect } from "react-redux";
-import { RouteComponentProps, withRouter } from "react-router-dom";
-import { Spinner } from "@blueprintjs/core";
-import { BuilderRouteParams } from "constants/routes";
-import { AppState } from "@appsmith/reducers";
-import MainContainer from "./MainContainer";
-import { DndProvider } from "react-dnd";
-import TouchBackend from "react-dnd-touch-backend";
+import type { RouteComponentProps } from "react-router-dom";
+import { withRouter } from "react-router-dom";
+import type { BuilderRouteParams } from "constants/routes";
+import type { AppState } from "ee/reducers";
+import IDE from "./IDE";
 import {
   getCurrentApplicationId,
   getIsEditorInitialized,
   getIsEditorLoading,
   getIsPublishingApplication,
+  getPageList,
   getPublishingError,
 } from "selectors/editorSelectors";
-import {
-  initEditor,
-  InitializeEditorPayload,
-  resetEditorRequest,
-} from "actions/initActions";
-import { editorInitializer } from "utils/editor/EditorUtils";
+import type { InitEditorActionPayload } from "actions/initActions";
+import { initEditorAction, resetEditorRequest } from "actions/initActions";
 import CenteredWrapper from "components/designSystems/appsmith/CenteredWrapper";
 import { getCurrentUser } from "selectors/usersSelectors";
-import { User } from "constants/userConstants";
+import type { User } from "constants/userConstants";
 import RequestConfirmationModal from "pages/Editor/RequestConfirmationModal";
 import * as Sentry from "@sentry/react";
 import { getTheme, ThemeMode } from "selectors/themeSelectors";
 import { ThemeProvider } from "styled-components";
-import { Theme } from "constants/DefaultTheme";
+import type { Theme } from "constants/DefaultTheme";
 import GlobalHotKeys from "./GlobalHotKeys";
-import { handlePathUpdated } from "actions/recentEntityActions";
-import GitSyncModal from "pages/Editor/gitSync/GitSyncModal";
-import DisconnectGitModal from "pages/Editor/gitSync/DisconnectGitModal";
-
-import history from "utils/history";
-import { fetchPage, updateCurrentPage } from "actions/pageActions";
-
+import { setupPageAction, updateCurrentPage } from "actions/pageActions";
 import { getCurrentPageId } from "selectors/editorSelectors";
-
 import { getSearchQuery } from "utils/helpers";
-import { getIsPageLevelSocketConnected } from "selectors/websocketSelectors";
-import {
-  collabStartSharingPointerEvent,
-  collabStopSharingPointerEvent,
-} from "actions/appCollabActions";
-import { loading } from "selectors/onboardingSelectors";
-import GuidedTourModal from "./GuidedTour/DeviationModal";
-import { getPageLevelSocketRoomId } from "sagas/WebsocketSagas/utils";
-import RepoLimitExceededErrorModal from "./gitSync/RepoLimitExceededErrorModal";
-import ImportedApplicationSuccessModal from "./gitSync/ImportedAppSuccessModal";
+import ImportedApplicationSuccessModal from "./gitSync/ImportSuccessModal";
 import { getIsBranchUpdated } from "../utils";
 import { APP_MODE } from "entities/App";
 import { GIT_BRANCH_QUERY_KEY } from "constants/routes";
 import TemplatesModal from "pages/Templates/TemplatesModal";
 import ReconnectDatasourceModal from "./gitSync/ReconnectDatasourceModal";
+import { Spinner } from "@appsmith/ads";
+import SignpostingOverlay from "pages/Editor/FirstTimeUserOnboarding/Overlay";
+import { editorInitializer } from "../../utils/editor/EditorUtils";
+import { widgetInitialisationSuccess } from "../../actions/widgetActions";
+import urlBuilder from "ee/entities/URLRedirect/URLAssembly";
+import { PartialExportModal } from "components/editorComponents/PartialImportExport/PartialExportModal";
+import { PartialImportModal } from "components/editorComponents/PartialImportExport/PartialImportModal";
+import type { Page } from "entities/Page";
+import { AppCURLImportModal } from "ee/pages/Editor/CurlImport";
+import { IDE_HEADER_HEIGHT } from "@appsmith/ads";
+import GeneratePageModal from "./GeneratePage";
+import { GitModals as NewGitModals } from "git";
+import GitSyncModal from "./gitSync/GitSyncModal";
+import GitSettingsModal from "./gitSync/GitSettingsModal";
+import DisconnectGitModal from "./gitSync/DisconnectGitModal";
+import DisableAutocommitModal from "./gitSync/DisableAutocommitModal";
+import ReconfigureCDKeyModal from "ee/components/gitComponents/ReconfigureCDKeyModal";
+import DisableCDModal from "ee/components/gitComponents/DisableCDModal";
+import RepoLimitExceededErrorModal from "./gitSync/RepoLimitExceededErrorModal";
+import { useGitModEnabled } from "./gitSync/hooks/modHooks";
+import GitApplicationContextProvider from "components/gitContexts/GitApplicationContextProvider";
 
-type EditorProps = {
+function GitModals() {
+  const isGitModEnabled = useGitModEnabled();
+
+  return isGitModEnabled ? (
+    <NewGitModals />
+  ) : (
+    <>
+      <GitSyncModal />
+      <GitSettingsModal />
+      <DisableCDModal />
+      <ReconfigureCDKeyModal />
+      <DisconnectGitModal />
+      <DisableAutocommitModal />
+      <RepoLimitExceededErrorModal />
+    </>
+  );
+}
+
+interface EditorProps {
   currentApplicationId?: string;
   currentApplicationName?: string;
-  initEditor: (payload: InitializeEditorPayload) => void;
+  initEditor: (payload: InitEditorActionPayload) => void;
   isPublishing: boolean;
   isEditorLoading: boolean;
   isEditorInitialized: boolean;
@@ -69,57 +87,32 @@ type EditorProps = {
   user?: User;
   lightTheme: Theme;
   resetEditorRequest: () => void;
-  handlePathUpdated: (location: typeof window.location) => void;
-  fetchPage: (pageId: string) => void;
+  setupPage: (pageId: string) => void;
   updateCurrentPage: (pageId: string) => void;
   handleBranchChange: (branch: string) => void;
   currentPageId?: string;
-  isPageLevelSocketConnected: boolean;
-  collabStartSharingPointerEvent: (pageId: string) => void;
-  collabStopSharingPointerEvent: (pageId?: string) => void;
   pageLevelSocketRoomId: string;
-};
+  isMultiPane: boolean;
+  widgetConfigBuildSuccess: () => void;
+  pages: Page[];
+}
 
 type Props = EditorProps & RouteComponentProps<BuilderRouteParams>;
 
 class Editor extends Component<Props> {
-  unlisten: any;
-  prevLocation: any;
-
-  public state = {
-    registered: false,
-  };
+  prevPageId: string | null = null;
 
   componentDidMount() {
+    const { basePageId } = this.props.match.params || {};
+
+    urlBuilder.setCurrentBasePageId(basePageId);
+
     editorInitializer().then(() => {
-      this.setState({ registered: true });
+      this.props.widgetConfigBuildSuccess();
     });
-
-    const {
-      location: { search },
-    } = this.props;
-    const branch = getSearchQuery(search, GIT_BRANCH_QUERY_KEY);
-
-    const { applicationId, pageId } = this.props.match.params;
-    if (pageId)
-      this.props.initEditor({
-        applicationId,
-        pageId,
-        branch,
-        mode: APP_MODE.EDIT,
-      });
-    this.props.handlePathUpdated(window.location);
-    this.prevLocation = window.location;
-    this.unlisten = history.listen(this.handleHistoryChange);
-
-    if (this.props.isPageLevelSocketConnected && pageId) {
-      this.props.collabStartSharingPointerEvent(
-        getPageLevelSocketRoomId(pageId, branch),
-      );
-    }
   }
 
-  shouldComponentUpdate(nextProps: Props, nextState: { registered: boolean }) {
+  shouldComponentUpdate(nextProps: Props) {
     const isBranchUpdated = getIsBranchUpdated(
       this.props.location,
       nextProps.location,
@@ -128,7 +121,8 @@ class Editor extends Component<Props> {
     return (
       isBranchUpdated ||
       nextProps.currentApplicationName !== this.props.currentApplicationName ||
-      nextProps.match?.params?.pageId !== this.props.match?.params?.pageId ||
+      nextProps.match?.params?.basePageId !==
+        this.props.match?.params?.basePageId ||
       nextProps.currentApplicationId !== this.props.currentApplicationId ||
       nextProps.isEditorInitialized !== this.props.isEditorInitialized ||
       nextProps.isPublishing !== this.props.isPublishing ||
@@ -136,16 +130,31 @@ class Editor extends Component<Props> {
       nextProps.errorPublishing !== this.props.errorPublishing ||
       nextProps.isEditorInitializeError !==
         this.props.isEditorInitializeError ||
-      nextProps.loadingGuidedTour !== this.props.loadingGuidedTour ||
-      nextState.registered !== this.state.registered ||
-      (nextProps.isPageLevelSocketConnected &&
-        !this.props.isPageLevelSocketConnected)
+      nextProps.loadingGuidedTour !== this.props.loadingGuidedTour
     );
   }
 
   componentDidUpdate(prevProps: Props) {
-    const { applicationId, pageId } = this.props.match.params || {};
-    const { pageId: prevPageId } = prevProps.match.params || {};
+    const { baseApplicationId, basePageId } = this.props.match.params || {};
+    const { basePageId: prevBasePageId } = prevProps.match.params || {};
+
+    const pageId = this.props.pages.find(
+      (page) => page.basePageId === basePageId,
+    )?.pageId;
+
+    const prevPageId = prevProps.pages.find(
+      (page) => page.basePageId === prevBasePageId,
+    )?.pageId;
+
+    // caching value for prevPageId as it is required in future lifecycles
+    if (prevPageId) {
+      this.prevPageId = prevPageId;
+    }
+
+    const isPageIdUpdated = pageId !== this.prevPageId;
+    const isBasePageIdUpdated = basePageId !== prevBasePageId;
+    const isPageUpdated = isPageIdUpdated || isBasePageIdUpdated;
+
     const isBranchUpdated = getIsBranchUpdated(
       this.props.location,
       prevProps.location,
@@ -160,98 +169,69 @@ class Editor extends Component<Props> {
       GIT_BRANCH_QUERY_KEY,
     );
 
-    const isPageIdUpdated = pageId !== prevPageId;
-
     // to prevent re-init during connect
-    if (prevBranch && isBranchUpdated && pageId) {
+    if (prevBranch && isBranchUpdated && basePageId) {
       this.props.initEditor({
-        applicationId,
-        pageId,
+        baseApplicationId,
+        basePageId,
         branch,
         mode: APP_MODE.EDIT,
       });
     } else {
       /**
        * First time load is handled by init sagas
-       * If we don't check for `prevPageId`: fetch page is retriggered
+       * If we don't check for `prevPageId`: fetch page is re triggered
        * when redirected to the default page
        */
-      if (prevPageId && pageId && isPageIdUpdated) {
+      if (pageId && this.prevPageId && isPageUpdated) {
         this.props.updateCurrentPage(pageId);
-        this.props.fetchPage(pageId);
+        this.props.setupPage(pageId);
+        urlBuilder.setCurrentBasePageId(basePageId);
       }
-    }
-
-    if (this.props.isPageLevelSocketConnected && isPageIdUpdated) {
-      this.props.collabStartSharingPointerEvent(
-        getPageLevelSocketRoomId(pageId, branch),
-      );
     }
   }
 
   componentWillUnmount() {
-    const { pageId } = this.props.match.params || {};
-    const {
-      location: { search },
-    } = this.props;
-    const branch = getSearchQuery(search, GIT_BRANCH_QUERY_KEY);
     this.props.resetEditorRequest();
-    if (typeof this.unlisten === "function") this.unlisten();
-    this.props.collabStopSharingPointerEvent(
-      getPageLevelSocketRoomId(pageId, branch),
-    );
+    urlBuilder.setCurrentBasePageId(null);
   }
 
-  handleHistoryChange = (location: any) => {
-    if (
-      this.prevLocation?.pathname !== location?.pathname ||
-      this.prevLocation?.search !== location?.search
-    ) {
-      this.props.handlePathUpdated(location);
-      this.prevLocation = location;
-    }
-  };
-
   public render() {
-    if (
-      !this.props.isEditorInitialized ||
-      !this.state.registered ||
-      this.props.loadingGuidedTour
-    ) {
+    if (!this.props.isEditorInitialized || this.props.loadingGuidedTour) {
       return (
-        <CenteredWrapper style={{ height: "calc(100vh - 35px)" }}>
-          <Spinner />
+        <CenteredWrapper
+          style={{ height: `calc(100vh - ${IDE_HEADER_HEIGHT}px)` }}
+        >
+          <Spinner size="lg" />
         </CenteredWrapper>
       );
     }
+
     return (
       <ThemeProvider theme={theme}>
-        <DndProvider
-          backend={TouchBackend}
-          options={{
-            enableMouseEvents: true,
-          }}
-        >
-          <div>
-            <Helmet>
-              <meta charSet="utf-8" />
-              <title>
-                {`${this.props.currentApplicationName} |`} Editor | Appsmith
-              </title>
-            </Helmet>
+        <div>
+          <Helmet>
+            <meta charSet="utf-8" />
+            <title>
+              {`${this.props.currentApplicationName} | Editor | Appsmith`}
+            </title>
+          </Helmet>
+          <GitApplicationContextProvider>
             <GlobalHotKeys>
-              <MainContainer />
-              <GitSyncModal />
-              <DisconnectGitModal />
-              <GuidedTourModal />
-              <RepoLimitExceededErrorModal />
+              <IDE />
+              <GitModals />
               <TemplatesModal />
               <ImportedApplicationSuccessModal />
               <ReconnectDatasourceModal />
+              <SignpostingOverlay />
+              <PartialExportModal />
+              <PartialImportModal />
+              <AppCURLImportModal />
+              <GeneratePageModal />
             </GlobalHotKeys>
-          </div>
-          <RequestConfirmationModal />
-        </DndProvider>
+          </GitApplicationContextProvider>
+        </div>
+        <RequestConfirmationModal />
       </ThemeProvider>
     );
   }
@@ -268,23 +248,19 @@ const mapStateToProps = (state: AppState) => ({
   user: getCurrentUser(state),
   currentApplicationName: state.ui.applications.currentApplication?.name,
   currentPageId: getCurrentPageId(state),
-  isPageLevelSocketConnected: getIsPageLevelSocketConnected(state),
-  loadingGuidedTour: loading(state),
+  pages: getPageList(state),
 });
 
+// TODO: Fix this the next time the file is edited
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mapDispatchToProps = (dispatch: any) => {
   return {
-    initEditor: (payload: InitializeEditorPayload) =>
-      dispatch(initEditor(payload)),
+    initEditor: (payload: InitEditorActionPayload) =>
+      dispatch(initEditorAction(payload)),
     resetEditorRequest: () => dispatch(resetEditorRequest()),
-    handlePathUpdated: (location: typeof window.location) =>
-      dispatch(handlePathUpdated(location)),
-    fetchPage: (pageId: string) => dispatch(fetchPage(pageId)),
+    setupPage: (pageId: string) => dispatch(setupPageAction({ id: pageId })),
     updateCurrentPage: (pageId: string) => dispatch(updateCurrentPage(pageId)),
-    collabStartSharingPointerEvent: (pageId: string) =>
-      dispatch(collabStartSharingPointerEvent(pageId)),
-    collabStopSharingPointerEvent: (pageId?: string) =>
-      dispatch(collabStopSharingPointerEvent(pageId)),
+    widgetConfigBuildSuccess: () => dispatch(widgetInitialisationSuccess()),
   };
 };
 

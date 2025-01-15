@@ -1,5 +1,7 @@
-import { ReduxActionTypes } from "@appsmith/constants/ReduxActionConstants";
-import reducer from "./canvasWidgetsReducer";
+import { ReduxActionTypes } from "ee/constants/ReduxActionConstants";
+import reducer, {
+  initialState as reducerInitialState,
+} from "./canvasWidgetsReducer";
 
 describe("Canvas Widgets Reducer", () => {
   it("should return the initial state", () => {
@@ -19,12 +21,15 @@ describe("Canvas Widgets Reducer", () => {
     };
     const type = ReduxActionTypes.UPDATE_MULTIPLE_WIDGET_PROPERTIES;
     const payload = {
-      xyz123: [
-        {
-          propertyPath: "someValue.apple",
-          propertyValue: "apple",
-        },
-      ],
+      widgetsToUpdate: {
+        xyz123: [
+          {
+            propertyPath: "someValue.apple",
+            propertyValue: "apple",
+          },
+        ],
+      },
+      shouldEval: false,
     };
     const expected = {
       "0": { children: ["xyz123"] },
@@ -53,12 +58,15 @@ describe("Canvas Widgets Reducer", () => {
     };
     const type = ReduxActionTypes.UPDATE_MULTIPLE_WIDGET_PROPERTIES;
     const payload = {
-      xyz123: [
-        {
-          propertyPath: "someValue.games.ball",
-          propertyValue: ["football"],
-        },
-      ],
+      widgetsToUpdate: {
+        xyz123: [
+          {
+            propertyPath: "someValue.games.ball",
+            propertyValue: ["football"],
+          },
+        ],
+      },
+      shouldEval: false,
     };
     const expected = {
       "0": { children: ["xyz123"] },
@@ -90,12 +98,15 @@ describe("Canvas Widgets Reducer", () => {
     };
     const type = ReduxActionTypes.UPDATE_MULTIPLE_WIDGET_PROPERTIES;
     const payload = {
-      xyz123: [
-        {
-          propertyPath: "someValue.apple",
-          propertyValue: "orange",
-        },
-      ],
+      widgetsToUpdate: {
+        xyz123: [
+          {
+            propertyPath: "someValue.apple",
+            propertyValue: "orange",
+          },
+        ],
+      },
+      shouldEval: false,
     };
 
     // Reference equality check using toBe
@@ -118,12 +129,15 @@ describe("Canvas Widgets Reducer", () => {
     };
     const type = ReduxActionTypes.UPDATE_MULTIPLE_WIDGET_PROPERTIES;
     const payload = {
-      xyz123: [
-        {
-          propertyPath: "someValue.apple",
-          propertyValue: "orange",
-        },
-      ],
+      widgetsToUpdate: {
+        xyz123: [
+          {
+            propertyPath: "someValue.apple",
+            propertyValue: "orange",
+          },
+        ],
+      },
+      shouldEval: true,
     };
 
     const result = reducer(initialState, { type, payload }).xyz123.someValue
@@ -131,5 +145,28 @@ describe("Canvas Widgets Reducer", () => {
 
     // Reference equality check using toBe
     expect(result).toBe(initialState.xyz123.someValue.games);
+  });
+
+  it("should reset to initial state on RESET_EDITOR_REQUEST", () => {
+    const initialState = {
+      "0": { children: ["xyz123"] },
+      xyz123: {
+        bottomRow: 20,
+        topRow: 10,
+        someValue: {
+          apple: "orange",
+          games: {
+            ball: ["football"],
+          },
+        },
+      },
+    };
+
+    const result = reducer(initialState, {
+      type: ReduxActionTypes.RESET_EDITOR_REQUEST,
+      payload: undefined,
+    });
+
+    expect(result).toStrictEqual(reducerInitialState);
   });
 });

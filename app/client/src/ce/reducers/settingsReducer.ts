@@ -1,12 +1,14 @@
+import type { ReduxAction } from "actions/ReduxActionTypes";
 import {
-  ReduxAction,
   ReduxActionErrorTypes,
   ReduxActionTypes,
-} from "@appsmith/constants/ReduxActionConstants";
+} from "ee/constants/ReduxActionConstants";
 import { createReducer } from "utils/ReducerUtils";
+import type { TenantReduxState } from "ee/reducers/tenantReducer";
+import { tenantConfigConnection } from "ee/constants/tenantConstants";
 
 export const initialState: SettingsReduxState = {
-  isLoading: false,
+  isLoading: true,
   isSaving: false,
   isRestarting: false,
   showReleaseNotes: false,
@@ -41,6 +43,60 @@ export const handlers = {
       ...action.payload,
     },
   }),
+  [ReduxActionTypes.FETCH_CURRENT_TENANT_CONFIG_SUCCESS]: (
+    // TODO: Fix this the next time the file is edited
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    state: SettingsReduxState & TenantReduxState<any>,
+    // TODO: Fix this the next time the file is edited
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    action: ReduxAction<TenantReduxState<any>>,
+  ) => {
+    // TODO: Fix this the next time the file is edited
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const configs: any = {};
+
+    tenantConfigConnection.forEach((key: string) => {
+      if (action.payload?.tenantConfiguration?.hasOwnProperty(key)) {
+        configs[key] = action.payload?.tenantConfiguration?.[key];
+      }
+    });
+
+    return {
+      ...state,
+      isLoading: false,
+      config: {
+        ...state.config,
+        ...configs,
+      },
+    };
+  },
+  [ReduxActionTypes.UPDATE_TENANT_CONFIG_SUCCESS]: (
+    // TODO: Fix this the next time the file is edited
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    state: SettingsReduxState & TenantReduxState<any>,
+    // TODO: Fix this the next time the file is edited
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    action: ReduxAction<TenantReduxState<any>>,
+  ) => {
+    // TODO: Fix this the next time the file is edited
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const configs: any = {};
+
+    tenantConfigConnection.forEach((key: string) => {
+      if (action.payload?.tenantConfiguration?.hasOwnProperty(key)) {
+        configs[key] = action.payload?.tenantConfiguration?.[key];
+      }
+    });
+
+    return {
+      ...state,
+      isLoading: false,
+      config: {
+        ...state.config,
+        ...configs,
+      },
+    };
+  },
   [ReduxActionTypes.FETCH_ADMIN_SETTINGS_ERROR]: (
     state: SettingsReduxState,
   ) => ({

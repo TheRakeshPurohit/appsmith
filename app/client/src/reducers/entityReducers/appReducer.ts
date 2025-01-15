@@ -1,18 +1,16 @@
 import { createReducer } from "utils/ReducerUtils";
-import {
-  ReduxAction,
-  ReduxActionTypes,
-} from "@appsmith/constants/ReduxActionConstants";
-import { User } from "constants/userConstants";
-import { APP_MODE } from "entities/App";
+import type { ReduxAction } from "actions/ReduxActionTypes";
+import { ReduxActionTypes } from "ee/constants/ReduxActionConstants";
+import type { User } from "constants/userConstants";
+import type { APP_MODE } from "entities/App";
 
-export type AuthUserState = {
+export interface AuthUserState {
   username: string;
   email: string;
   id: string;
-};
+}
 
-export type UrlDataState = {
+export interface UrlDataState {
   queryParams: Record<string, string>;
   protocol: string;
   host: string;
@@ -21,14 +19,11 @@ export type UrlDataState = {
   pathname: string;
   hash: string;
   fullPath: string;
-};
+}
 
-export type AppStoreState = {
-  transient: Record<string, unknown>;
-  persistent: Record<string, unknown>;
-};
+export type AppStoreState = Record<string, unknown>;
 
-export type AppDataState = {
+export interface AppDataState {
   mode?: APP_MODE;
   user: AuthUserState;
   URL: UrlDataState;
@@ -37,7 +32,10 @@ export type AppDataState = {
     canBeRequested: boolean;
     currentPosition?: Partial<GeolocationPosition>;
   };
-};
+  // TODO: Fix this the next time the file is edited
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  workflows: Record<string, any>;
+}
 
 const initialState: AppDataState = {
   user: {
@@ -55,14 +53,12 @@ const initialState: AppDataState = {
     hash: "",
     fullPath: "",
   },
-  store: {
-    transient: {},
-    persistent: {},
-  },
+  store: {},
   geolocation: {
     canBeRequested: "geolocation" in navigator,
     currentPosition: {},
   },
+  workflows: {},
 };
 
 const appReducer = createReducer(initialState, {
@@ -93,28 +89,13 @@ const appReducer = createReducer(initialState, {
       URL: action.payload,
     };
   },
-  [ReduxActionTypes.UPDATE_APP_TRANSIENT_STORE]: (
+  [ReduxActionTypes.UPDATE_APP_STORE]: (
     state: AppDataState,
     action: ReduxAction<Record<string, unknown>>,
   ) => {
     return {
       ...state,
-      store: {
-        ...state.store,
-        transient: action.payload,
-      },
-    };
-  },
-  [ReduxActionTypes.UPDATE_APP_PERSISTENT_STORE]: (
-    state: AppDataState,
-    action: ReduxAction<Record<string, unknown>>,
-  ) => {
-    return {
-      ...state,
-      store: {
-        ...state.store,
-        persistent: action.payload,
-      },
+      store: action.payload,
     };
   },
   [ReduxActionTypes.SET_USER_CURRENT_GEO_LOCATION]: (

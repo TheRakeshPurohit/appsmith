@@ -1,372 +1,210 @@
-import React from "react";
-import { RouteComponentProps } from "react-router";
-import { connect } from "react-redux";
-import { getFormValues } from "redux-form";
-import styled from "styled-components";
-import { INTEGRATION_TABS, QueryEditorRouteParams } from "constants/routes";
+import React, { useCallback, useMemo } from "react";
+import { useDispatch, useSelector } from "react-redux";
+import type { RouteComponentProps } from "react-router";
+
+import AnalyticsUtil from "ee/utils/AnalyticsUtil";
+import Editor from "./Editor";
 import history from "utils/history";
-import QueryEditorForm from "./Form";
-import {
-  deleteAction,
-  runAction,
-  setActionResponseDisplayFormat,
-  UpdateActionPropertyActionPayload,
-  setActionProperty,
-} from "actions/pluginActionActions";
-import { AppState } from "@appsmith/reducers";
+import MoreActionsMenu from "../Explorer/Actions/MoreActionsMenu";
+import BackToCanvas from "components/common/BackToCanvas";
+import { INTEGRATION_TABS } from "constants/routes";
 import {
   getCurrentApplicationId,
   getIsEditorInitialized,
+  getPagePermissions,
 } from "selectors/editorSelectors";
-import { QUERY_EDITOR_FORM_NAME } from "@appsmith/constants/forms";
-import { Plugin, UIComponentTypes } from "api/PluginApi";
-import { Datasource } from "entities/Datasource";
+import { changeQuery } from "PluginActionEditor/store";
+import { DatasourceCreateEntryPoints } from "constants/Datasource";
 import {
-  getPluginIdsOfPackageNames,
-  getPlugins,
-  getAction,
-  getActionResponses,
-  getDatasourceByPluginId,
-  getDBAndRemoteDatasources,
-} from "selectors/entitiesSelector";
-import { PLUGIN_PACKAGE_DBS } from "constants/QueryEditorConstants";
-import { QueryAction, SaaSAction } from "entities/Action";
-import Spinner from "components/editorComponents/Spinner";
-import CenteredWrapper from "components/designSystems/appsmith/CenteredWrapper";
+  getActionByBaseId,
+  getIsActionConverting,
+  getPluginImages,
+  getPluginSettingConfigs,
+} from "ee/selectors/entitiesSelector";
+import { integrationEditorURL } from "ee/RouteBuilder";
+import { QueryEditorContextProvider } from "./QueryEditorContext";
+import type { QueryEditorRouteParams } from "constants/routes";
 import {
-  changeQuery,
-  setQueryPaneResponsePaneHeight,
-} from "actions/queryPaneActions";
-import PerformanceTracker, {
-  PerformanceTransactionName,
-} from "utils/PerformanceTracker";
-import AnalyticsUtil from "utils/AnalyticsUtil";
-import { initFormEvaluations } from "actions/evaluationActions";
-import { getUIComponent } from "./helpers";
-import { diff, Diff } from "deep-diff";
-import EntityNotFoundPane from "pages/Editor/EntityNotFoundPane";
-import { integrationEditorURL } from "RouteBuilder";
-import { getConfigInitialValues } from "components/formControls/utils";
-import { merge } from "lodash";
-import { getPathAndValueFromActionDiffObject } from "../../../utils/getPathAndValueFromActionDiffObject";
-import { ActionExecutionResizerHeight } from "../APIEditor/constants";
+  getHasCreateActionPermission,
+  getHasDeleteActionPermission,
+  getHasManageActionPermission,
+} from "ee/utils/BusinessFeatures/permissionPageHelpers";
+import { FEATURE_FLAG } from "ee/entities/FeatureFlag";
+import { useFeatureFlag } from "utils/hooks/useFeatureFlag";
+import Disabler from "pages/common/Disabler";
+import ConvertToModuleInstanceCTA from "ee/pages/Editor/EntityEditor/ConvertToModuleInstanceCTA";
+import { MODULE_TYPE } from "ee/constants/ModuleConstants";
+import ConvertEntityNotification from "ee/pages/common/ConvertEntityNotification";
+import { PluginType } from "entities/Plugin";
+import { Icon } from "@appsmith/ads";
+import { resolveIcon } from "../utils";
+import { ENTITY_ICON_SIZE, EntityIcon } from "../Explorer/ExplorerIcons";
+import { getIDEViewMode } from "selectors/ideSelectors";
+import { EditorViewMode } from "ee/entities/IDE/constants";
+import { saveActionName } from "actions/pluginActionActions";
 
-const EmptyStateContainer = styled.div`
-  display: flex;
-  height: 100%;
-  font-size: 20px;
-`;
+type QueryEditorProps = RouteComponentProps<QueryEditorRouteParams>;
 
-const LoadingContainer = styled(CenteredWrapper)`
-  height: 50%;
-`;
+function QueryEditor(props: QueryEditorProps) {
+  const { baseApiId, basePageId, baseQueryId } = props.match.params;
+  const baseActionId = baseQueryId || baseApiId;
+  const dispatch = useDispatch();
+  const action = useSelector((state) =>
+    getActionByBaseId(state, baseActionId || ""),
+  );
+  const pluginId = action?.pluginId || "";
+  const isEditorInitialized = useSelector(getIsEditorInitialized);
+  const applicationId: string = useSelector(getCurrentApplicationId);
+  const isFeatureEnabled = useFeatureFlag(FEATURE_FLAG.license_gac_enabled);
+  const settingsConfig = useSelector((state) =>
+    getPluginSettingConfigs(state, pluginId),
+  );
+  const pagePermissions = useSelector(getPagePermissions);
+  const isConverting = useSelector((state) =>
+    getIsActionConverting(state, action?.id || ""),
+  );
+  const pluginImages = useSelector(getPluginImages);
+  const editorMode = useSelector(getIDEViewMode);
+  const icon = resolveIcon({
+    iconLocation: pluginImages[pluginId] || "",
+    pluginType: action?.pluginType || "",
+    moduleType: action?.actionConfiguration?.body?.moduleType,
+  }) || (
+    <EntityIcon
+      height={`${ENTITY_ICON_SIZE}px`}
+      width={`${ENTITY_ICON_SIZE}px`}
+    >
+      <Icon name="module" />
+    </EntityIcon>
+  );
 
-type ReduxDispatchProps = {
-  runAction: (actionId: string) => void;
-  deleteAction: (id: string, name: string) => void;
-  changeQueryPage: (queryId: string) => void;
-  initFormEvaluation: (
-    editorConfig: any,
-    settingConfig: any,
-    formId: string,
-  ) => void;
-  updateActionResponseDisplayFormat: ({
-    field,
-    id,
-    value,
-  }: UpdateActionPropertyActionPayload) => void;
-  setActionProperty: (
-    actionId: string,
-    propertyName: string,
-    value: string,
-  ) => void;
-  setQueryPaneResponsePaneHeight: (height: number) => void;
-};
+  const isDeletePermitted = getHasDeleteActionPermission(
+    isFeatureEnabled,
+    action?.userPermissions,
+  );
 
-type ReduxStateProps = {
-  plugins: Plugin[];
-  dataSources: Datasource[];
-  isRunning: boolean;
-  isDeleting: boolean;
-  formData: QueryAction | SaaSAction;
-  runErrorMessage: Record<string, string>;
-  pluginId: string | undefined;
-  pluginIds: Array<string> | undefined;
-  responses: any;
-  isCreating: boolean;
-  editorConfig: any;
-  settingConfig: any;
-  isEditorInitialized: boolean;
-  uiComponent: UIComponentTypes;
-  applicationId: string;
-  actionId: string;
-  actionObjectDiff?: any;
-  isSaas: boolean;
-};
+  const isChangePermitted = getHasManageActionPermission(
+    isFeatureEnabled,
+    action?.userPermissions,
+  );
 
-type StateAndRouteProps = RouteComponentProps<QueryEditorRouteParams>;
+  const isCreatePermitted = getHasCreateActionPermission(
+    isFeatureEnabled,
+    pagePermissions,
+  );
 
-type Props = StateAndRouteProps & ReduxDispatchProps & ReduxStateProps;
+  const moreActionsMenu = useMemo(() => {
+    const convertToModuleProps = {
+      canCreateModuleInstance: isCreatePermitted,
+      canDeleteEntity: isDeletePermitted,
+      entityId: action?.id || "",
+      moduleType: MODULE_TYPE.QUERY,
+    };
 
-class QueryEditor extends React.Component<Props> {
-  constructor(props: Props) {
-    super(props);
-    // Call the first evaluations when the page loads
-    // call evaluations only for queries and not google sheets (which uses apiId)
-    if (this.props.match.params.queryId) {
-      this.props.initFormEvaluation(
-        this.props.editorConfig,
-        this.props.settingConfig,
-        this.props.match.params.queryId,
-      );
-    }
-  }
-
-  componentDidMount() {
-    // if the current action is non existent, do not dispatch change query page action
-    // this action should only be dispatched when switching from an existent action.
-    if (!this.props.pluginId) return;
-    this.props.changeQueryPage(this.props.actionId);
-
-    // fixes missing where key issue by populating the action with a where object when the component is mounted.
-    if (this.props.isSaas) {
-      const { path = "", value = "" } = {
-        ...getPathAndValueFromActionDiffObject(this.props.actionObjectDiff),
-      };
-      if (value && path) {
-        this.props.setActionProperty(this.props.actionId, path, value);
-      }
-    }
-
-    PerformanceTracker.stopTracking(PerformanceTransactionName.OPEN_ACTION, {
-      actionType: "QUERY",
-    });
-  }
-
-  handleDeleteClick = () => {
-    const { formData } = this.props;
-    this.props.deleteAction(this.props.actionId, formData.name);
-  };
-
-  handleRunClick = () => {
-    const { dataSources } = this.props;
-    PerformanceTracker.startTracking(
-      PerformanceTransactionName.RUN_QUERY_CLICK,
-      { actionId: this.props.actionId },
+    return (
+      <>
+        <MoreActionsMenu
+          basePageId={basePageId}
+          className="t--more-action-menu"
+          id={action?.id || ""}
+          isChangePermitted={isChangePermitted}
+          isDeletePermitted={isDeletePermitted}
+          name={action?.name || ""}
+          prefixAdditionalMenus={
+            editorMode === EditorViewMode.SplitScreen && (
+              <ConvertToModuleInstanceCTA {...convertToModuleProps} />
+            )
+          }
+        />
+        {action?.pluginType !== PluginType.INTERNAL &&
+          editorMode !== EditorViewMode.SplitScreen && (
+            // Need to remove this check once workflow query is supported in module
+            <ConvertToModuleInstanceCTA {...convertToModuleProps} />
+          )}
+      </>
     );
-    AnalyticsUtil.logEvent("RUN_QUERY_CLICK", {
-      actionId: this.props.actionId,
-      dataSourceSize: dataSources.length,
-    });
-    this.props.runAction(this.props.actionId);
+  }, [
+    action?.id,
+    action?.name,
+    action?.pluginType,
+    isChangePermitted,
+    isDeletePermitted,
+    basePageId,
+    isCreatePermitted,
+    editorMode,
+  ]);
 
-    // reset response pane height back to original
-    this.props.setQueryPaneResponsePaneHeight(ActionExecutionResizerHeight);
-  };
+  const actionRightPaneBackLink = useMemo(() => {
+    return <BackToCanvas basePageId={basePageId} />;
+  }, [basePageId]);
 
-  componentDidUpdate(prevProps: Props) {
-    if (prevProps.isRunning === true && this.props.isRunning === false) {
-      PerformanceTracker.stopTracking(
-        PerformanceTransactionName.RUN_QUERY_CLICK,
+  const changeQueryPage = useCallback(
+    (baseQueryId: string) => {
+      dispatch(
+        changeQuery({ baseQueryId: baseQueryId, basePageId, applicationId }),
       );
-    }
-    // Update the page when the queryID is changed by changing the
-    // URL or selecting new query from the query pane
-    // reusing same logic for changing query panes for switching query editor datasources, since the operations are similar.
-    if (
-      prevProps.actionId !== this.props.actionId ||
-      prevProps.pluginId !== this.props.pluginId
-    ) {
-      this.props.changeQueryPage(this.props.actionId);
-    }
-  }
+    },
+    [basePageId, applicationId, dispatch],
+  );
 
-  onCreateDatasourceClick = () => {
-    const { pageId } = this.props.match.params;
+  const onCreateDatasourceClick = useCallback(() => {
     history.push(
       integrationEditorURL({
-        pageId,
+        basePageId: basePageId,
         selectedTab: INTEGRATION_TABS.NEW,
       }),
     );
-  };
+    // Event for datasource creation click
+    const entryPoint = DatasourceCreateEntryPoints.QUERY_EDITOR;
 
-  render() {
-    const {
-      actionId,
-      dataSources,
-      editorConfig,
-      isCreating,
-      isDeleting,
-      isEditorInitialized,
-      isRunning,
-      pluginId,
-      pluginIds,
-      responses,
-      runErrorMessage,
-      settingConfig,
-      uiComponent,
-      updateActionResponseDisplayFormat,
-    } = this.props;
-    const { pageId } = this.props.match.params;
+    AnalyticsUtil.logEvent("NAVIGATE_TO_CREATE_NEW_DATASOURCE_PAGE", {
+      entryPoint,
+    });
+  }, [basePageId]);
 
-    // custom function to return user to integrations page if action is not found
-    const goToDatasourcePage = () =>
+  // custom function to return user to integrations page if action is not found
+  const onEntityNotFoundBackClick = useCallback(
+    () =>
       history.push(
         integrationEditorURL({
-          pageId,
+          basePageId: basePageId,
           selectedTab: INTEGRATION_TABS.ACTIVE,
         }),
-      );
-
-    // if the action can not be found, generate a entity not found page
-    if (!pluginId && actionId) {
-      return <EntityNotFoundPane goBackFn={goToDatasourcePage} />;
-    }
-
-    if (!pluginIds?.length) {
-      return (
-        <EmptyStateContainer>{"Plugin is not installed"}</EmptyStateContainer>
-      );
-    }
-
-    if (isCreating || !isEditorInitialized) {
-      return (
-        <LoadingContainer>
-          <Spinner size={30} />
-        </LoadingContainer>
-      );
-    }
-
-    return (
-      <QueryEditorForm
-        dataSources={dataSources}
-        editorConfig={editorConfig}
-        executedQueryData={responses[actionId]}
-        formData={this.props.formData}
-        isDeleting={isDeleting}
-        isRunning={isRunning}
-        location={this.props.location}
-        onCreateDatasourceClick={this.onCreateDatasourceClick}
-        onDeleteClick={this.handleDeleteClick}
-        onRunClick={this.handleRunClick}
-        runErrorMessage={runErrorMessage[actionId]}
-        settingConfig={settingConfig}
-        uiComponent={uiComponent}
-        updateActionResponseDisplayFormat={updateActionResponseDisplayFormat}
-      />
-    );
-  }
-}
-
-const mapStateToProps = (state: AppState, props: any): ReduxStateProps => {
-  const { apiId, queryId } = props.match.params;
-  const actionId = queryId || apiId;
-  const { runErrorMessage } = state.ui.queryPane;
-  const { plugins } = state.entities;
-
-  const { editorConfigs, settingConfigs } = plugins;
-
-  const action = getAction(state, actionId) as QueryAction | SaaSAction;
-  let pluginId;
-  if (action) {
-    pluginId = action.pluginId;
-  }
-
-  let editorConfig: any;
-
-  if (editorConfigs && pluginId) {
-    editorConfig = editorConfigs[pluginId];
-  }
-
-  let settingConfig: any;
-
-  if (settingConfigs && pluginId) {
-    settingConfig = settingConfigs[pluginId];
-  }
-
-  const initialValues = {};
-
-  if (editorConfig) {
-    merge(initialValues, getConfigInitialValues(editorConfig));
-  }
-
-  if (settingConfig) {
-    merge(initialValues, getConfigInitialValues(settingConfig));
-  }
-
-  // initialValues contains merge of action, editorConfig, settingsConfig and will be passed to redux form
-  merge(initialValues, action);
-
-  // @ts-expect-error: Types are not available
-  const actionObjectDiff: undefined | Diff<Action | undefined, Action>[] = diff(
-    action,
-    initialValues,
+      ),
+    [basePageId],
   );
 
-  const allPlugins = getPlugins(state);
-  let uiComponent = UIComponentTypes.DbEditorForm;
-  if (!!pluginId) uiComponent = getUIComponent(pluginId, allPlugins);
+  const notification = useMemo(() => {
+    if (!isConverting) return null;
 
-  const formData = getFormValues(QUERY_EDITOR_FORM_NAME)(state) as
-    | QueryAction
-    | SaaSAction;
+    return (
+      <ConvertEntityNotification
+        icon={icon}
+        name={action?.name || ""}
+        withPadding
+      />
+    );
+  }, [action?.name, isConverting, icon]);
 
-  return {
-    actionId,
-    pluginId,
-    plugins: allPlugins,
-    runErrorMessage,
-    pluginIds: getPluginIdsOfPackageNames(state, PLUGIN_PACKAGE_DBS),
-    dataSources: !!apiId
-      ? getDatasourceByPluginId(state, action?.pluginId)
-      : getDBAndRemoteDatasources(state),
-    responses: getActionResponses(state),
-    isRunning: state.ui.queryPane.isRunning[actionId],
-    isDeleting: state.ui.queryPane.isDeleting[actionId],
-    isSaas: !!apiId,
-    formData,
-    editorConfig,
-    settingConfig,
-    isCreating: state.ui.apiPane.isCreating,
-    isEditorInitialized: getIsEditorInitialized(state),
-    uiComponent,
-    applicationId: getCurrentApplicationId(state),
-    actionObjectDiff,
-  };
-};
+  return (
+    <QueryEditorContextProvider
+      actionRightPaneBackLink={actionRightPaneBackLink}
+      changeQueryPage={changeQueryPage}
+      moreActionsMenu={moreActionsMenu}
+      notification={notification}
+      onCreateDatasourceClick={onCreateDatasourceClick}
+      onEntityNotFoundBackClick={onEntityNotFoundBackClick}
+      saveActionName={saveActionName}
+    >
+      <Disabler isDisabled={isConverting}>
+        <Editor
+          {...props}
+          isEditorInitialized={isEditorInitialized}
+          settingsConfig={settingsConfig}
+        />
+      </Disabler>
+    </QueryEditorContextProvider>
+  );
+}
 
-const mapDispatchToProps = (dispatch: any): ReduxDispatchProps => ({
-  deleteAction: (id: string, name: string) =>
-    dispatch(deleteAction({ id, name })),
-  runAction: (actionId: string) => dispatch(runAction(actionId)),
-  changeQueryPage: (queryId: string) => {
-    dispatch(changeQuery(queryId));
-  },
-  initFormEvaluation: (
-    editorConfig: any,
-    settingsConfig: any,
-    formId: string,
-  ) => {
-    dispatch(initFormEvaluations(editorConfig, settingsConfig, formId));
-  },
-  updateActionResponseDisplayFormat: ({
-    field,
-    id,
-    value,
-  }: UpdateActionPropertyActionPayload) => {
-    dispatch(setActionResponseDisplayFormat({ id, field, value }));
-  },
-  setActionProperty: (
-    actionId: string,
-    propertyName: string,
-    value: string,
-  ) => {
-    dispatch(setActionProperty({ actionId, propertyName, value }));
-  },
-  setQueryPaneResponsePaneHeight: (height) => {
-    dispatch(setQueryPaneResponsePaneHeight(height));
-  },
-});
-
-export default connect(mapStateToProps, mapDispatchToProps)(QueryEditor);
+export default QueryEditor;

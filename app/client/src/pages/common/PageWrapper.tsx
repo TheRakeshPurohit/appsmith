@@ -1,8 +1,17 @@
-import React, { ReactNode } from "react";
+import type { ReactNode } from "react";
+import React, { useMemo } from "react";
 import { Helmet } from "react-helmet";
 import styled from "styled-components";
+import {
+  getPageTitle,
+  getHTMLPageTitle,
+} from "ee/utils/BusinessFeatures/brandingPageHelpers";
+import { useFeatureFlag } from "utils/hooks/useFeatureFlag";
+import { FEATURE_FLAG } from "ee/entities/FeatureFlag";
+import { getTenantConfig } from "ee/selectors/tenantSelectors";
+import { useSelector } from "react-redux";
 
-const Wrapper = styled.section<{ isFixed?: boolean }>`
+export const Wrapper = styled.section<{ isFixed?: boolean }>`
   ${(props) =>
     props.isFixed
       ? `margin: 0;
@@ -31,10 +40,10 @@ const Wrapper = styled.section<{ isFixed?: boolean }>`
   }
 `;
 
-const PageBody = styled.div<{ isSavable?: boolean }>`
+export const PageBody = styled.div<{ isSavable?: boolean }>`
   height: calc(
-    100vh - ${(props) => props.theme.homePage.header}px - ${(props) =>
-  props.isSavable ? "84px" : "0px"}
+    100vh - ${(props) => props.theme.homePage.header}px -
+      ${(props) => (props.isSavable ? "84px" : "0px")}
   );
   display: flex;
   flex-direction: column;
@@ -47,21 +56,35 @@ const PageBody = styled.div<{ isSavable?: boolean }>`
   }
 `;
 
-type PageWrapperProps = {
+export interface PageWrapperProps {
   children?: ReactNode;
   displayName?: string;
   isFixed?: boolean;
   isSavable?: boolean;
-};
+}
 
 export function PageWrapper(props: PageWrapperProps) {
   const { isFixed = false, isSavable = false } = props;
+  const isBrandingEnabled = useFeatureFlag(
+    FEATURE_FLAG?.license_branding_enabled,
+  );
+  const tentantConfig = useSelector(getTenantConfig);
+  const { instanceName } = tentantConfig;
+
+  const titleSuffix = useMemo(
+    () => getHTMLPageTitle(isBrandingEnabled, instanceName),
+    [isBrandingEnabled, instanceName],
+  );
+
+  const pageTitle = useMemo(
+    () => getPageTitle(isBrandingEnabled, props.displayName, titleSuffix),
+    [isBrandingEnabled, props.displayName, titleSuffix],
+  );
+
   return (
     <Wrapper isFixed={isFixed}>
       <Helmet>
-        <title>{`${
-          props.displayName ? `${props.displayName} | ` : ""
-        }Appsmith`}</title>
+        <title>{pageTitle}</title>
       </Helmet>
       <PageBody isSavable={isSavable}>{props.children}</PageBody>
     </Wrapper>

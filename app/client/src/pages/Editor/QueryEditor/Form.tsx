@@ -1,44 +1,30 @@
 import { formValueSelector, reduxForm } from "redux-form";
-import { QUERY_EDITOR_FORM_NAME } from "@appsmith/constants/forms";
-import { Action } from "entities/Action";
+import { QUERY_EDITOR_FORM_NAME } from "ee/constants/forms";
+import type { Action } from "entities/Action";
 import { connect } from "react-redux";
-import { AppState } from "@appsmith/reducers";
+import type { AppState } from "ee/reducers";
 import {
   getPluginResponseTypes,
   getPluginDocumentationLinks,
   getPlugin,
   getActionData,
-} from "selectors/entitiesSelector";
-import { EditorJSONtoForm, EditorJSONtoFormProps } from "./EditorJSONtoForm";
+} from "ee/selectors/entitiesSelector";
+import type { EditorJSONtoFormProps } from "./EditorJSONtoForm";
+import { EditorJSONtoForm } from "./EditorJSONtoForm";
 import { getFormEvaluationState } from "selectors/formSelectors";
+import { actionResponseDisplayDataFormats } from "../utils";
 
 const valueSelector = formValueSelector(QUERY_EDITOR_FORM_NAME);
+// TODO: Fix this the next time the file is edited
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mapStateToProps = (state: AppState, props: any) => {
   const actionId = valueSelector(state, "id");
   const actionName = valueSelector(state, "name");
   const pluginId = valueSelector(state, "datasource.pluginId");
   const selectedDbId = valueSelector(state, "datasource.id");
   const actionData = getActionData(state, actionId);
-  let responseDisplayFormat: { title: string; value: string };
-  let responseDataTypes: { key: string; title: string }[];
-  if (actionData && actionData.responseDisplayFormat) {
-    responseDataTypes = actionData.dataTypes.map((data) => {
-      return {
-        key: data.dataType,
-        title: data.dataType,
-      };
-    });
-    responseDisplayFormat = {
-      title: actionData.responseDisplayFormat,
-      value: actionData.responseDisplayFormat,
-    };
-  } else {
-    responseDataTypes = [];
-    responseDisplayFormat = {
-      title: "",
-      value: "",
-    };
-  }
+  const { responseDataTypes, responseDisplayFormat } =
+    actionResponseDisplayDataFormats(actionData);
 
   const responseTypes = getPluginResponseTypes(state);
   const documentationLinks = getPluginDocumentationLinks(state);

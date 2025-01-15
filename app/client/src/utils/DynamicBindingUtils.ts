@@ -1,26 +1,36 @@
-import _, { get, isString, VERSION as lodashVersion } from "lodash";
+import _, { get, isString } from "lodash";
 import { DATA_BIND_REGEX } from "constants/BindingsConstants";
-import { Action } from "entities/Action";
-import moment from "moment-timezone";
-import { WidgetProps } from "widgets/BaseWidget";
-import parser from "fast-xml-parser";
-
-import { Severity } from "entities/AppsmithConsole";
+import type { Action } from "entities/Action";
+import type { WidgetProps } from "widgets/BaseWidget";
+import type { Severity } from "entities/AppsmithConsole";
 import {
   getEntityNameAndPropertyPath,
+  isAction,
   isJSAction,
   isTrueObject,
-} from "workers/Evaluation/evaluationUtils";
-import forge from "node-forge";
-import { DataTreeEntity } from "entities/DataTree/dataTreeFactory";
+  isWidget,
+} from "ee/workers/Evaluation/evaluationUtils";
+import type { DataTreeEntityConfig } from "ee/entities/DataTree/types";
+import type { DataTreeEntity } from "entities/DataTree/dataTreeTypes";
 import { getType, Types } from "./TypeHelpers";
 import { ViewTypes } from "components/formControls/utils";
 
 export type DependencyMap = Record<string, Array<string>>;
+// TODO: Fix this the next time the file is edited
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type FormEditorConfigs = Record<string, any[]>;
+// TODO: Fix this the next time the file is edited
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type FormSettingsConfigs = Record<string, any[]>;
 export type FormDependencyConfigs = Record<string, DependencyMap>;
 export type FormDatasourceButtonConfigs = Record<string, string[]>;
+
+function hasNonStringSemicolons(stringifiedJS: string) {
+  // This regex pattern matches semicolons that are not inside single or double quotes
+  const regex = /;(?=(?:[^']*'[^']*')*[^']*$)(?=(?:[^"]*"[^"]*")*[^"]*$)/g;
+
+  return regex.test(stringifiedJS);
+}
 
 // referencing DATA_BIND_REGEX fails for the value "{{Table1.tableData[Table1.selectedRowIndex]}}" if you run it multiple times and don't recreate
 export const isDynamicValue = (value: string): boolean =>
@@ -30,11 +40,14 @@ export const isDynamicValue = (value: string): boolean =>
 export function getDynamicStringSegments(dynamicString: string): string[] {
   let stringSegments = [];
   const indexOfDoubleParanStart = dynamicString.indexOf("{{");
+
   if (indexOfDoubleParanStart === -1) {
     return [dynamicString];
   }
+
   //{{}}{{}}}
   const firstString = dynamicString.substring(0, indexOfDoubleParanStart);
+
   firstString && stringSegments.push(firstString);
   let rest = dynamicString.substring(
     indexOfDoubleParanStart,
@@ -42,6 +55,7 @@ export function getDynamicStringSegments(dynamicString: string): string[] {
   );
   //{{}}{{}}}
   let sum = 0;
+
   for (let i = 0; i <= rest.length - 1; i++) {
     const char = rest[i];
     const prevChar = rest[i - 1];
@@ -50,9 +64,11 @@ export function getDynamicStringSegments(dynamicString: string): string[] {
       sum++;
     } else if (char === "}") {
       sum--;
+
       if (prevChar === "}" && sum === 0) {
         stringSegments.push(rest.substring(0, i + 1));
         rest = rest.substring(i + 1, rest.length);
+
         if (rest) {
           stringSegments = stringSegments.concat(
             getDynamicStringSegments(rest),
@@ -62,9 +78,11 @@ export function getDynamicStringSegments(dynamicString: string): string[] {
       }
     }
   }
+
   if (sum !== 0 && dynamicString !== "") {
     return [dynamicString];
   }
+
   return stringSegments;
 }
 
@@ -74,28 +92,31 @@ export const getDynamicBindings = (
   entity?: DataTreeEntity,
 ): { stringSegments: string[]; jsSnippets: string[] } => {
   // Protect against bad string parse
-  if (!dynamicString || !_.isString(dynamicString)) {
+  if (!isString(dynamicString)) {
     return { stringSegments: [], jsSnippets: [] };
   }
+
   const sanitisedString = dynamicString.trim();
-  let stringSegments, paths: any;
+
   if (entity && isJSAction(entity)) {
-    stringSegments = [sanitisedString];
-    paths = [sanitisedString];
-  } else {
-    // Get the {{binding}} bound values
-    stringSegments = getDynamicStringSegments(sanitisedString);
-    // Get the "binding" path values
-    paths = stringSegments.map((segment) => {
-      const length = segment.length;
-      const matches = isDynamicValue(segment);
-      if (matches) {
-        return segment.substring(2, length - 2);
-      }
-      return "";
-    });
+    return { stringSegments: [sanitisedString], jsSnippets: [sanitisedString] };
   }
-  return { stringSegments: stringSegments, jsSnippets: paths };
+
+  // Get the {{binding}} bound values
+  const stringSegments = getDynamicStringSegments(sanitisedString);
+  // Get the "binding" path values
+  const jsSnippets = stringSegments.map((segment) => {
+    const length = segment.length;
+    const matches = isDynamicValue(segment);
+
+    if (matches) {
+      return segment.substring(2, length - 2);
+    }
+
+    return "";
+  });
+
+  return { stringSegments, jsSnippets };
 };
 
 export const combineDynamicBindings = (
@@ -105,13 +126,29 @@ export const combineDynamicBindings = (
   return stringSegments
     .map((segment, index) => {
       if (jsSnippets[index] && jsSnippets[index].length > 0) {
-        return jsSnippets[index];
+        return addOperatorPrecedenceIfNeeded(jsSnippets[index]);
       } else {
-        return `'${segment}'`;
+        return JSON.stringify(segment);
       }
     })
     .join(" + ");
 };
+
+/**
+ * Operator precedence example: JSCode =  Color is  {{ currentItem.color || "Blue"}}  PS: currentItem.color is undefined
+ *  Previously this code would be transformed to  (() =>  "Color is" + currentItem.color || "Blue")() which evaluates to "Color is undefined" rather than "Color is Blue"
+ * with precedence we'd have (() =>  "Color is" + (currentItem.color || "Blue"))() which evaluates to Color is Blue,  because the parentheses change the order of evaluation, giving  higher precedence in this case to (currentItem.color || "Blue").
+ */
+function addOperatorPrecedenceIfNeeded(stringifiedJS: string) {
+  /**
+   *  parenthesis doesn't work with ; i.e Color is  {{ currentItem.color || "Blue" ;}} cant be (() =>  "Color is" + (currentItem.color || "Blue";))()
+   */
+  if (!hasNonStringSemicolons(stringifiedJS)) {
+    return `(${stringifiedJS})`;
+  }
+
+  return stringifiedJS;
+}
 
 export enum EvalErrorTypes {
   CYCLICAL_DEPENDENCY_ERROR = "CYCLICAL_DEPENDENCY_ERROR",
@@ -122,84 +159,17 @@ export enum EvalErrorTypes {
   PARSE_JS_ERROR = "PARSE_JS_ERROR",
   EXTRACT_DEPENDENCY_ERROR = "EXTRACT_DEPENDENCY_ERROR",
   CLONE_ERROR = "CLONE_ERROR",
+  SERIALIZATION_ERROR = "SERIALIZATION_ERROR",
 }
 
-export type EvalError = {
+export interface EvalError {
   type: EvalErrorTypes;
   message: string;
+  // TODO: Fix this the next time the file is edited
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   context?: Record<string, any>;
-};
-
-export enum EVAL_WORKER_ACTIONS {
-  SETUP = "SETUP",
-  EVAL_TREE = "EVAL_TREE",
-  EVAL_ACTION_BINDINGS = "EVAL_ACTION_BINDINGS",
-  EVAL_TRIGGER = "EVAL_TRIGGER",
-  PROCESS_TRIGGER = "PROCESS_TRIGGER",
-  CLEAR_CACHE = "CLEAR_CACHE",
-  VALIDATE_PROPERTY = "VALIDATE_PROPERTY",
-  UNDO = "undo",
-  REDO = "redo",
-  EVAL_EXPRESSION = "EVAL_EXPRESSION",
-  UPDATE_REPLAY_OBJECT = "UPDATE_REPLAY_OBJECT",
-  SET_EVALUATION_VERSION = "SET_EVALUATION_VERSION",
-  INIT_FORM_EVAL = "INIT_FORM_EVAL",
-  EXECUTE_SYNC_JS = "EXECUTE_SYNC_JS",
-  LINT_TREE = "LINT_TREE",
 }
 
-export type ExtraLibrary = {
-  version: string;
-  docsURL: string;
-  displayName: string;
-  accessor: string;
-  lib: any;
-};
-
-export const extraLibraries: ExtraLibrary[] = [
-  {
-    accessor: "_",
-    lib: _,
-    version: lodashVersion,
-    docsURL: `https://lodash.com/docs/${lodashVersion}`,
-    displayName: "lodash",
-  },
-  {
-    accessor: "moment",
-    lib: moment,
-    version: moment.version,
-    docsURL: `https://momentjs.com/docs/`,
-    displayName: "moment",
-  },
-  {
-    accessor: "xmlParser",
-    lib: parser,
-    version: "3.17.5",
-    docsURL: "https://github.com/NaturalIntelligence/fast-xml-parser",
-    displayName: "xmlParser",
-  },
-  {
-    accessor: "forge",
-    // We are removing some functionalities of node-forge because they wont
-    // work in the worker thread
-    lib: _.omit(forge, ["tls", "http", "xhr", "socket", "task"]),
-    version: "1.3.0",
-    docsURL: "https://github.com/digitalbazaar/forge",
-    displayName: "forge",
-  },
-];
-/**
- * creates dynamic list of constants based on
- * current list of extra libraries i.e lodash("_"), moment etc
- * to be used in widget and entity name validations
- */
-export const extraLibrariesNames = extraLibraries.reduce(
-  (prev: Record<string, string>, curr) => {
-    prev[curr.accessor] = curr.accessor;
-    return prev;
-  },
-  {},
-);
 export interface DynamicPath {
   key: string;
   value?: string;
@@ -225,6 +195,7 @@ export const getEntityDynamicBindingPathList = (
   ) {
     return [...entity.dynamicBindingPathList];
   }
+
   return [];
 };
 
@@ -239,6 +210,7 @@ export const isPathADynamicBinding = (
   ) {
     return _.find(entity.dynamicBindingPathList, { key: path }) !== undefined;
   }
+
   return false;
 };
 /**
@@ -261,13 +233,13 @@ export const getWidgetDynamicTriggerPathList = (
   ) {
     return [...widget.dynamicTriggerPathList];
   }
+
   return [];
 };
 
-export const isPathADynamicTrigger = (
-  widget: WidgetProps,
-  path: string,
-): boolean => {
+// TODO: Fix this the next time the file is edited
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const isPathDynamicTrigger = (widget: any, path: string): boolean => {
   if (
     widget &&
     widget.dynamicTriggerPathList &&
@@ -275,6 +247,7 @@ export const isPathADynamicTrigger = (
   ) {
     return _.find(widget.dynamicTriggerPathList, { key: path }) !== undefined;
   }
+
   return false;
 };
 
@@ -288,10 +261,11 @@ export const getWidgetDynamicPropertyPathList = (
   ) {
     return [...widget.dynamicPropertyPathList];
   }
+
   return [];
 };
 
-export const isPathADynamicProperty = (
+export const isPathDynamicProperty = (
   widget: WidgetProps,
   path: string,
 ): boolean => {
@@ -302,6 +276,7 @@ export const isPathADynamicProperty = (
   ) {
     return _.find(widget.dynamicPropertyPathList, { key: path }) !== undefined;
   }
+
   return false;
 };
 
@@ -316,19 +291,19 @@ export const isThemeBoundProperty = (
 
 export const unsafeFunctionForEval = [
   "XMLHttpRequest",
-  "setInterval",
-  "clearInterval",
   "setImmediate",
-  "importScripts",
   "Navigator",
 ];
 
 export const isChildPropertyPath = (
   parentPropertyPath: string,
   childPropertyPath: string,
+  // In non-strict mode, an exact match is treated as a child path
+  // Eg. "Api1" is a child property path of "Api1"
+  strict = false,
 ): boolean => {
   return (
-    parentPropertyPath === childPropertyPath ||
+    (!strict && parentPropertyPath === childPropertyPath) ||
     childPropertyPath.startsWith(`${parentPropertyPath}.`) ||
     childPropertyPath.startsWith(`${parentPropertyPath}[`)
   );
@@ -351,7 +326,7 @@ export const EVAL_ERROR_PATH = `${EVALUATION_PATH}.errors`;
 export const EVAL_VALUE_PATH = `${EVALUATION_PATH}.evaluatedValues`;
 
 /**
- * non-populated object 
+ * non-populated object
  {
    __evaluation__:{
      evaluatedValues:{
@@ -381,9 +356,8 @@ const getNestedEvalPath = (
   fullPath = true,
   isPopulated = false,
 ) => {
-  const { entityName, propertyPath } = getEntityNameAndPropertyPath(
-    fullPropertyPath,
-  );
+  const { entityName, propertyPath } =
+    getEntityNameAndPropertyPath(fullPropertyPath);
   const nestedPath = isPopulated
     ? `${pathType}.${propertyPath}`
     : `${pathType}.['${propertyPath}']`;
@@ -391,6 +365,7 @@ const getNestedEvalPath = (
   if (fullPath) {
     return `${entityName}.${nestedPath}`;
   }
+
   return nestedPath;
 };
 
@@ -430,9 +405,17 @@ export enum PropertyEvaluationErrorType {
   LINT = "LINT",
 }
 
+export enum PropertyEvaluationErrorCategory {
+  ACTION_INVOCATION_IN_DATA_FIELD = "ACTION_INVOCATION_IN_DATA_FIELD",
+}
+export interface PropertyEvaluationErrorKind {
+  category: PropertyEvaluationErrorCategory;
+  rootcause: string;
+}
+
 export interface DataTreeError {
   raw: string;
-  errorMessage: string;
+  errorMessage: Error;
   severity: Severity.WARNING | Severity.ERROR;
 }
 
@@ -441,6 +424,7 @@ export interface EvaluationError extends DataTreeError {
     | PropertyEvaluationErrorType.PARSE
     | PropertyEvaluationErrorType.VALIDATION;
   originalBinding?: string;
+  kind?: Partial<PropertyEvaluationErrorKind>;
 }
 
 export interface LintError extends DataTreeError {
@@ -451,6 +435,8 @@ export interface LintError extends DataTreeError {
   code: string;
   line: number;
   ch: number;
+  originalPath?: string;
+  lintLength?: number;
 }
 
 export interface DataTreeEvaluationProps {
@@ -474,6 +460,8 @@ export const PropertyEvalErrorTypeDebugMessage: Record<
 let temporaryDynamicPathStore: DynamicPath[] = [];
 
 // recursive function to get full key path of any object that has dynamic bindings.
+// TODO: Fix this the next time the file is edited
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const getDynamicValuePaths = (val: any, parentPath: string) => {
   if (isString(val) && isDynamicValue(val)) {
     return temporaryDynamicPathStore.push({ key: `${parentPath}` });
@@ -496,11 +484,16 @@ export function getDynamicBindingsChangesSaga(
   action: Action,
   value: unknown,
   field: string,
+  // TODO: Fix this the next time the file is edited
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  formData?: any,
 ) {
   const bindingField = field.replace("actionConfiguration.", "");
   // we listen to any viewType changes.
   const viewType = field.endsWith(".viewType");
-  let dynamicBindings: DynamicPath[] = action.dynamicBindingPathList || [];
+  let dynamicBindings: DynamicPath[] = action.dynamicBindingPathList
+    ? [...action.dynamicBindingPathList]
+    : [];
 
   if (field.endsWith(".jsonData") || field.endsWith(".componentData")) {
     return dynamicBindings;
@@ -508,16 +501,26 @@ export function getDynamicBindingsChangesSaga(
 
   if (
     action.datasource &&
-    "datasourceConfiguration" in action.datasource &&
+    ("datasourceConfiguration" in action.datasource ||
+      "datasourceConfiguration" in (formData?.datasource || {})) &&
     field === "datasource"
   ) {
     // only the datasource.datasourceConfiguration.url can be a dynamic field
     dynamicBindings = dynamicBindings.filter(
-      (binding) => binding.key !== "datasourceUrl",
+      (binding) => binding.key !== "datasourceUrl" && binding.key !== "path",
     );
-    const datasourceUrl = action.datasource.datasourceConfiguration.url;
+    // ideally as we check for the datasource url, we should check for the path field as well.
+    const datasourceUrl = action.datasource?.datasourceConfiguration?.url || "";
+    const datasourcePathField = action.actionConfiguration?.path;
+    const datasourceFormPathField = formData?.actionConfiguration?.path;
+
     isDynamicValue(datasourceUrl) &&
       dynamicBindings.push({ key: "datasourceUrl" });
+
+    // as we check the datasource url for bindings, check the path too.
+    isDynamicValue(datasourcePathField || datasourceFormPathField) &&
+      dynamicBindings.push({ key: "path" });
+
     return dynamicBindings;
   }
 
@@ -532,9 +535,11 @@ export function getDynamicBindingsChangesSaga(
 
     // then we recursively go through the value and find paths with dynamic bindings
     temporaryDynamicPathStore = [];
+
     if (!!value) {
       getDynamicValuePaths(value, bindingField);
     }
+
     if (!!temporaryDynamicPathStore && temporaryDynamicPathStore.length > 0) {
       dynamicBindings = [...dynamicBindings, ...temporaryDynamicPathStore];
     }
@@ -542,8 +547,11 @@ export function getDynamicBindingsChangesSaga(
     dynamicBindings = dynamicBindings.filter((dynamicPath) => {
       if (isChildPropertyPath(bindingField, dynamicPath.key)) {
         const childPropertyValue = _.get(value, dynamicPath.key);
+
         return isDynamicValue(childPropertyValue);
       }
+
+      return !!dynamicPath;
     });
   } else if (typeof value === "string") {
     const fieldExists = _.some(dynamicBindings, { key: bindingField });
@@ -553,8 +561,9 @@ export function getDynamicBindingsChangesSaga(
     if (!isDynamic && fieldExists) {
       dynamicBindings = dynamicBindings.filter((d) => d.key !== bindingField);
     }
+
     if (isDynamic && !fieldExists) {
-      dynamicBindings.push({ key: bindingField });
+      dynamicBindings = [...dynamicBindings, { key: bindingField }];
     }
   }
 
@@ -571,6 +580,7 @@ export function getDynamicBindingsChangesSaga(
   // if the currently changing field is a component's view type
   if (!!viewType) {
     const dataBindingField = bindingField.replace(".viewType", ".data");
+
     // then we filter the field of any paths that includes the binding fields
     dynamicBindings = dynamicBindings.filter(
       (dynamicPath) => !dynamicPath?.key?.includes(dataBindingField),
@@ -580,21 +590,48 @@ export function getDynamicBindingsChangesSaga(
     if (value === ViewTypes.JSON) {
       const jsonFieldPath = field.replace(".viewType", ".jsonData");
       const jsonFieldValue = get(action, jsonFieldPath);
+
       if (isDynamicValue(jsonFieldValue)) {
         dynamicBindings.push({ key: dataBindingField });
       }
     } else if (value === ViewTypes.COMPONENT) {
       const componentFieldPath = field.replace(".viewType", ".componentData");
       const componentFieldValue = get(action, componentFieldPath);
+
       temporaryDynamicPathStore = [];
 
       if (!!componentFieldValue) {
         getDynamicValuePaths(componentFieldValue, dataBindingField);
       }
+
       if (!!temporaryDynamicPathStore && temporaryDynamicPathStore.length > 0) {
         dynamicBindings = [...dynamicBindings, ...temporaryDynamicPathStore];
       }
     }
   }
+
   return dynamicBindings;
+}
+
+export function getEntityType(entity: DataTreeEntity) {
+  return "ENTITY_TYPE" in entity && entity.ENTITY_TYPE;
+}
+
+export function getEntityId(entity: DataTreeEntity) {
+  if (isAction(entity)) return entity.actionId;
+
+  if (isWidget(entity)) return entity.widgetId;
+
+  if (isJSAction(entity)) return entity.actionId;
+}
+
+export function getEntityName(
+  entity: DataTreeEntity,
+  entityConfig: DataTreeEntityConfig,
+) {
+  if (isAction(entity)) return entityConfig.name;
+
+  if (isWidget(entity)) return entity.widgetName;
+
+  if (isJSAction(entity)) return entityConfig.name;
 }
